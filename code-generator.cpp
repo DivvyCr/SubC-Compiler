@@ -26,7 +26,6 @@ using std::vector;
 using std::unique_ptr;
 
 using namespace llvm;
-using namespace abstract_syntax;
 
 namespace minic_code_generator {
 

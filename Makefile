@@ -22,8 +22,8 @@ DEPS = abstract-syntax.h lexer.h parser.h
 #     COMMAND1
 #     COMMAND2
 #     ...
-minic: minic.o parser.o lexer.o abstract-syntax.o printer.o code-generator.o
-	$(CXX) minic.o parser.o lexer.o abstract-syntax.o printer.o code-generator.o $(CFLAGS) -o out
+minic: minic.o parser.o lexer.o printer.o code-generator.o
+	$(CXX) minic.o parser.o lexer.o printer.o code-generator.o $(CFLAGS) -o out
 
 clean:
 	rm -rf minic.o parser.o lexer.o abstract-syntax.o code-generator.o printer.o out

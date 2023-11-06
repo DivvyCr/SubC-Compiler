@@ -1,26 +1,22 @@
 #ifndef _VISITOR_H
 #define _VISITOR_H
 
-namespace abstract_syntax {
-  class IntAST;
-  class FloatAST;
-  class BoolAST;
-  class VariableAST;
-  class AssignmentAST;
-  class FunctionCallAST;
-  class UnaryExpressionAST;
-  class BinaryExpressionAST;
-  class CodeBlockAST;
-  class IfBlockAST;
-  class WhileBlockAST;
-  class ReturnAST;
-  class GlobalVariableAST;
-  class PrototypeAST;
-  class FunctionAST;
-  class ProgramAST;
-}
-
-using namespace abstract_syntax;
+class IntAST;
+class FloatAST;
+class BoolAST;
+class VariableAST;
+class AssignmentAST;
+class FunctionCallAST;
+class UnaryExpressionAST;
+class BinaryExpressionAST;
+class CodeBlockAST;
+class IfBlockAST;
+class WhileBlockAST;
+class ReturnAST;
+class GlobalVariableAST;
+class PrototypeAST;
+class FunctionAST;
+class ProgramAST;
 
 class Visitor {
   public:

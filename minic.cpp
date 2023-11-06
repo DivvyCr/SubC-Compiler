@@ -25,7 +25,7 @@ int main(int argc, char **argv) {
   }
 
   // Run parser:
-  unique_ptr<AST> root = parser::startParse(input_file);
+  unique_ptr<AST> root = minic_parser::startParse(input_file);
   // Print AST:
   std::cout << *root << "\n";
   // Generate code:
