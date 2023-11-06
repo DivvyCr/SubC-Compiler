@@ -27,14 +27,16 @@ namespace parser {
   unique_ptr<AST> startParse(FILE *input_file);
 
   // Program:
-  static unique_ptr<AST> parseProgram();
+  static unique_ptr<ProgramAST> parseProgram();
   static unique_ptr<PrototypeAST> parseExtern();
 
-  static vector<unique_ptr<AST>> parseDeclList();
-  static unique_ptr<AST> parseDecl();
-  static unique_ptr<AST> parseDeclExt(int token_type);
+  using DeclPair = std::pair<vector<unique_ptr<FunctionAST>>, vector<unique_ptr<GlobalVariableAST>>>;
 
-  static unique_ptr<AST> parseFuncSpec(TOKEN token, const string &ident, MiniCType return_type);
+  static DeclPair parseDeclList();
+  static DeclPair parseDecl(DeclPair decls);
+  static DeclPair parseDeclExt(int token_type, DeclPair decls);
+
+  static DeclPair parseFuncSpec(TOKEN token, const string &ident, MiniCType return_type, DeclPair decls);
   static vector<unique_ptr<VariableAST>> parseParameters();
   static unique_ptr<VariableAST> parseParameter();
 

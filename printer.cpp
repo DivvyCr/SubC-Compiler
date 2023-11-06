@@ -114,6 +114,10 @@ namespace minic_printer {
       }
       return nullptr;
     }
+    void* visit(GlobalVariableAST &node) override {
+      print(*node.getVariable());
+      return nullptr;
+    }
     void* visit(PrototypeAST &node) override {
       Out << CurrentPrefix << "Prototype: " << node.getIdentifier();
       for (auto &param : node.getParameters()) print(*param);
@@ -128,7 +132,7 @@ namespace minic_printer {
     void* visit(ProgramAST &node) override {
       Out << CurrentPrefix << "Program:";
       for (auto &ex : node.getExterns()) print(*ex);
-      for (auto &decl : node.getDeclarations()) print(*decl);
+      for (auto &f : node.getFunctions()) print(*f);
       return nullptr;
     }
 

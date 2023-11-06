@@ -62,6 +62,9 @@ namespace abstract_syntax {
   ReturnAST::ReturnAST(TOKEN token, unique_ptr<ExpressionAST> body)
     : Token(token), Body(std::move(body)) {}
 
+  GlobalVariableAST::GlobalVariableAST(unique_ptr<VariableAST> variable)
+    : Variable(std::move(variable)) {}
+
   PrototypeAST::PrototypeAST(TOKEN token, const string &ident, MiniCType return_type,
       vector<unique_ptr<VariableAST>> parameters)
     : Token(token), Identifier(ident), ReturnType(return_type),
@@ -74,10 +77,13 @@ namespace abstract_syntax {
     : Token(token), Prototype(std::move(prototype)), Body(std::move(body)) {}
 
   ProgramAST::ProgramAST(vector<unique_ptr<PrototypeAST>> externs,
-      vector<unique_ptr<AST>> declarations)
+      vector<unique_ptr<FunctionAST>> functions,
+      vector<unique_ptr<GlobalVariableAST>> globals)
         : Externs(std::make_move_iterator(externs.begin()),
             std::make_move_iterator(externs.end())),
-        Declarations(std::make_move_iterator(declarations.begin()),
-            std::make_move_iterator(declarations.end())) {}
+        Functions(std::make_move_iterator(functions.begin()),
+            std::make_move_iterator(functions.end())),
+        Globals(std::make_move_iterator(globals.begin()),
+            std::make_move_iterator(globals.end())){}
 
 }

@@ -10,7 +10,7 @@ namespace parser {
     return parseProgram();
   }
 
-  static unique_ptr<AST> parseProgram() {
+  static unique_ptr<ProgramAST> parseProgram() {
     getNextToken(); // Consume first token (always INVALID).
     
     vector<unique_ptr<PrototypeAST>> externs;
@@ -19,12 +19,12 @@ namespace parser {
       externs.push_back(std::move(first_extern));
     }
 
-    vector<unique_ptr<AST>> decls;
+    std::pair<vector<unique_ptr<FunctionAST>>, vector<unique_ptr<GlobalVariableAST>>> ret;
     if (isAnyType(active_token.type)) {
-      decls = parseDeclList();
+      ret = parseDeclList();
     }
 
-    return make_unique<ProgramAST>(std::move(externs), std::move(decls));
+    return make_unique<ProgramAST>(std::move(externs), std::move(ret.first), std::move(ret.second));
   }
 
   static unique_ptr<PrototypeAST> parseExtern() {
@@ -79,46 +79,51 @@ namespace parser {
     return make_unique<PrototypeAST>(t, ident, return_type, std::move(parameters));
   }
 
-  static vector<unique_ptr<AST>> parseDeclList() {
-    vector<unique_ptr<AST>> temp;
+  static DeclPair parseDeclList() {
+    vector<unique_ptr<FunctionAST>> functions;
+    vector<unique_ptr<GlobalVariableAST>> globals;
+
+    DeclPair ret = std::make_pair(std::move(functions), std::move(globals));
 
     while (isAnyType(active_token.type)) {
-      unique_ptr<AST> decl = parseDecl();
-      temp.push_back(std::move(decl));
+      ret = parseDecl(std::move(ret));
     }
 
     if (active_token.type == EOF_TOK) {
-      return temp;
+      return ret;
     }
 
     raiseError("parseDeclList");
-    return vector<unique_ptr<AST>>();
+    return std::make_pair(vector<unique_ptr<FunctionAST>>(), vector<unique_ptr<GlobalVariableAST>>());
   }
 
-  static unique_ptr<AST> parseDecl() {
+  static DeclPair parseDecl(DeclPair decls) {
     auto cur_type = active_token.type;
     getNextToken(); // Consume TYPE
 
     if (isVarType(cur_type)) {
-      return parseDeclExt(cur_type);
+      return parseDeclExt(cur_type, std::move(decls));
     } else if (cur_type == VOID_TOK) {
       TOKEN t = active_token;
       auto func_ident = lexer_data.identifier_val;
       getNextToken(); // Consume IDENT
-      return parseFuncSpec(t, func_ident, VOID);
+      return parseFuncSpec(t, func_ident, VOID, std::move(decls));
     }
 
-    return raiseError("parseDecl");
+    return std::make_pair(vector<unique_ptr<FunctionAST>>(), vector<unique_ptr<GlobalVariableAST>>());
   }
 
-  static unique_ptr<AST> parseDeclExt(int token_type) {
+  static DeclPair parseDeclExt(int token_type, DeclPair decls) {
     string ident = lexer_data.identifier_val;
     TOKEN t = active_token;
     getNextToken(); // Consume IDENT
 
     if (active_token.type == SC) {
       getNextToken(); // Consume ;
-      return parseVariable(t, token_type, ident);
+      unique_ptr<VariableAST> v = parseVariable(t, token_type, ident);
+      unique_ptr<GlobalVariableAST> g = std::make_unique<GlobalVariableAST>(std::move(v));
+      std::move(decls.second).push_back(std::move(g));
+      return decls;
     } else if (active_token.type == LPAR) {
       MiniCType return_type;
       switch (token_type) {
@@ -137,20 +142,22 @@ namespace parser {
         default:
           break; // Unreachable due to check above.
       }
-      return parseFuncSpec(t, ident, return_type);
+      return parseFuncSpec(t, ident, return_type, std::move(decls));
     }
 
-    return raiseError("parseDeclExt");
+    return std::make_pair(vector<unique_ptr<FunctionAST>>(), vector<unique_ptr<GlobalVariableAST>>());
   }
 
-  static unique_ptr<AST> parseFuncSpec(TOKEN token, const string &ident, MiniCType return_type) {
+  static DeclPair parseFuncSpec(TOKEN token, const string &ident, MiniCType return_type, DeclPair decls) {
     getNextToken(); // Consume (
     vector<unique_ptr<VariableAST>> parameters = parseParameters();
     getNextToken(); // Consume )
     unique_ptr<CodeBlockAST> body = parseCodeBlock();
 
     unique_ptr<PrototypeAST> proto = make_unique<PrototypeAST>(token, ident, return_type, std::move(parameters));
-    return make_unique<FunctionAST>(token, std::move(proto), std::move(body));
+    unique_ptr<FunctionAST> f = make_unique<FunctionAST>(token, std::move(proto), std::move(body));
+    std::move(decls.first).push_back(std::move(f));
+    return decls;
   }
 
   static vector<unique_ptr<VariableAST>> parseParameters() {
