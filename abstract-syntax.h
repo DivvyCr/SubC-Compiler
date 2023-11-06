@@ -275,6 +275,15 @@ namespace abstract_syntax {
       unique_ptr<ExpressionAST> Body;
   };
 
+  class GlobalVariableAST : public AST {
+    public:
+      GlobalVariableAST(unique_ptr<VariableAST> variable);
+      void *dispatch(Visitor &visitor) override { return visitor.visit(*this); }
+      unique_ptr<VariableAST> &getVariable() { return Variable; }
+    private:
+      unique_ptr<VariableAST> Variable;
+  };
+
   class PrototypeAST : public AST {
     public:
       PrototypeAST(TOKEN token, const string &ident, MiniCType type,
@@ -309,13 +318,16 @@ namespace abstract_syntax {
   class ProgramAST : public AST {
     public:
       ProgramAST(vector<unique_ptr<PrototypeAST>> externs,
-          vector<unique_ptr<AST>> declarations);
+          vector<unique_ptr<FunctionAST>> functions,
+          vector<unique_ptr<GlobalVariableAST>> globals);
       void *dispatch(Visitor &visitor) override { return visitor.visit(*this); }
       vector<unique_ptr<PrototypeAST>> &getExterns() { return Externs; }
-      vector<unique_ptr<AST>> &getDeclarations() { return Declarations; }
+      vector<unique_ptr<FunctionAST>> &getFunctions() { return Functions; }
+      vector<unique_ptr<GlobalVariableAST>> &getGlobals() { return Globals; }
     private:
       vector<unique_ptr<PrototypeAST>> Externs;
-      vector<unique_ptr<AST>> Declarations;
+      vector<unique_ptr<FunctionAST>> Functions;
+      vector<unique_ptr<GlobalVariableAST>> Globals;
   };
 
   //inline llvm::raw_ostream &operator<<(llvm::raw_ostream &os,

@@ -14,6 +14,7 @@ namespace abstract_syntax {
   class IfBlockAST;
   class WhileBlockAST;
   class ReturnAST;
+  class GlobalVariableAST;
   class PrototypeAST;
   class FunctionAST;
   class ProgramAST;
@@ -35,6 +36,7 @@ class Visitor {
     virtual void* visit(IfBlockAST &node) = 0;
     virtual void* visit(WhileBlockAST &node) = 0;
     virtual void* visit(ReturnAST &node) = 0;
+    virtual void* visit(GlobalVariableAST &node) = 0;
     virtual void* visit(PrototypeAST &node) = 0;
     virtual void* visit(FunctionAST &node) = 0;
     virtual void* visit(ProgramAST &node) = 0;
