@@ -1,6 +1,6 @@
 #include "lexer.h"
 
-namespace lexer {
+namespace minic_lexer {
 
   LEXER_DATA updateData(LEXER_DATA data) {
     static int prev_char = ' ';

@@ -1,6 +1,6 @@
 #include "parser.h"
 
-namespace parser {
+namespace minic_parser {
 
   unique_ptr<AST> startParse(FILE *input_file) {
     lexer_data.input_file = input_file;
@@ -10,16 +10,16 @@ namespace parser {
     return parseProgram();
   }
 
-  static unique_ptr<ProgramAST> parseProgram() {
+  static PtrProgramAST parseProgram() {
     getNextToken(); // Consume first token (always INVALID).
     
-    vector<unique_ptr<PrototypeAST>> externs;
+    vector<PtrPrototypeAST> externs;
     while (active_token.type == EXTERN) {
-      unique_ptr<PrototypeAST> first_extern = parseExtern();
+      PtrPrototypeAST first_extern = parseExtern();
       externs.push_back(std::move(first_extern));
     }
 
-    std::pair<vector<unique_ptr<FunctionAST>>, vector<unique_ptr<GlobalVariableAST>>> ret;
+    std::pair<vector<PtrFunctionAST>, vector<PtrGlobalVariableAST>> ret;
     if (isAnyType(active_token.type)) {
       ret = parseDeclList();
     }
@@ -27,7 +27,7 @@ namespace parser {
     return make_unique<ProgramAST>(std::move(externs), std::move(ret.first), std::move(ret.second));
   }
 
-  static unique_ptr<PrototypeAST> parseExtern() {
+  static PtrPrototypeAST parseExtern() {
     TOKEN t = active_token;
     getNextToken(); // Consume EXTERN
  
@@ -64,7 +64,7 @@ namespace parser {
     }
     getNextToken();
 
-    vector<unique_ptr<VariableAST>> parameters = parseParameters();
+    vector<PtrVariableAST> parameters = parseParameters();
 
     if (active_token.type != RPAR) {
       return raiseError("parseExtern: Expected ')'");
@@ -80,8 +80,8 @@ namespace parser {
   }
 
   static DeclPair parseDeclList() {
-    vector<unique_ptr<FunctionAST>> functions;
-    vector<unique_ptr<GlobalVariableAST>> globals;
+    vector<PtrFunctionAST> functions;
+    vector<PtrGlobalVariableAST> globals;
 
     DeclPair ret = std::make_pair(std::move(functions), std::move(globals));
 
@@ -94,7 +94,7 @@ namespace parser {
     }
 
     raiseError("parseDeclList");
-    return std::make_pair(vector<unique_ptr<FunctionAST>>(), vector<unique_ptr<GlobalVariableAST>>());
+    return std::make_pair(vector<PtrFunctionAST>(), vector<PtrGlobalVariableAST>());
   }
 
   static DeclPair parseDecl(DeclPair decls) {
@@ -110,7 +110,7 @@ namespace parser {
       return parseFuncSpec(t, func_ident, VOID, std::move(decls));
     }
 
-    return std::make_pair(vector<unique_ptr<FunctionAST>>(), vector<unique_ptr<GlobalVariableAST>>());
+    return std::make_pair(vector<PtrFunctionAST>(), vector<PtrGlobalVariableAST>());
   }
 
   static DeclPair parseDeclExt(int token_type, DeclPair decls) {
@@ -120,8 +120,8 @@ namespace parser {
 
     if (active_token.type == SC) {
       getNextToken(); // Consume ;
-      unique_ptr<VariableAST> v = parseVariable(t, token_type, ident);
-      unique_ptr<GlobalVariableAST> g = std::make_unique<GlobalVariableAST>(std::move(v));
+      PtrVariableAST v = parseVariable(t, token_type, ident);
+      PtrGlobalVariableAST g = std::make_unique<GlobalVariableAST>(std::move(v));
       std::move(decls.second).push_back(std::move(g));
       return decls;
     } else if (active_token.type == LPAR) {
@@ -145,31 +145,31 @@ namespace parser {
       return parseFuncSpec(t, ident, return_type, std::move(decls));
     }
 
-    return std::make_pair(vector<unique_ptr<FunctionAST>>(), vector<unique_ptr<GlobalVariableAST>>());
+    return std::make_pair(vector<PtrFunctionAST>(), vector<PtrGlobalVariableAST>());
   }
 
   static DeclPair parseFuncSpec(TOKEN token, const string &ident, MiniCType return_type, DeclPair decls) {
     getNextToken(); // Consume (
-    vector<unique_ptr<VariableAST>> parameters = parseParameters();
+    vector<PtrVariableAST> parameters = parseParameters();
     getNextToken(); // Consume )
-    unique_ptr<CodeBlockAST> body = parseCodeBlock();
+    PtrCodeBlockAST body = parseCodeBlock();
 
-    unique_ptr<PrototypeAST> proto = make_unique<PrototypeAST>(token, ident, return_type, std::move(parameters));
-    unique_ptr<FunctionAST> f = make_unique<FunctionAST>(token, std::move(proto), std::move(body));
+    PtrPrototypeAST proto = make_unique<PrototypeAST>(token, ident, return_type, std::move(parameters));
+    PtrFunctionAST f = make_unique<FunctionAST>(token, std::move(proto), std::move(body));
     std::move(decls.first).push_back(std::move(f));
     return decls;
   }
 
-  static vector<unique_ptr<VariableAST>> parseParameters() {
-    vector<unique_ptr<VariableAST>> parameters;
+  static vector<PtrVariableAST> parseParameters() {
+    vector<PtrVariableAST> parameters;
 
     if (isVarType(active_token.type)) {
-      unique_ptr<VariableAST> first_parameter = parseParameter();
+      PtrVariableAST first_parameter = parseParameter();
       parameters.push_back(std::move(first_parameter));
 
       while (active_token.type == COMMA) {
         getNextToken(); // Consume COMMA
-        unique_ptr<VariableAST> parameter = parseParameter();
+        PtrVariableAST parameter = parseParameter();
         parameters.push_back(std::move(parameter));
       }
     } else if (active_token.type == VOID_TOK) {
@@ -179,7 +179,7 @@ namespace parser {
     return parameters;
   }
 
-  static unique_ptr<VariableAST> parseParameter() {
+  static PtrVariableAST parseParameter() {
     auto parameter_type = active_token.type;
     getNextToken(); // Consume TYPE
     TOKEN t = active_token; 
@@ -189,7 +189,7 @@ namespace parser {
     return parseVariable(t, parameter_type, parameter_ident);
   }
 
-  static unique_ptr<IfBlockAST> parseIfBlock() {
+  static PtrIfBlockAST parseIfBlock() {
     TOKEN t = active_token;
     getNextToken(); // Consume IF
     if (active_token.type != LPAR) {
@@ -200,7 +200,7 @@ namespace parser {
     if (!isExpression(active_token.type)) {
       return raiseError("parseIfBlock: Expected EXPR");
     }
-    unique_ptr<ExpressionAST> condition = parseExpression();
+    PtrExpressionAST condition = parseExpression();
 
     if (active_token.type != RPAR) {
       return raiseError("parseIfBlock: Expected ')'");
@@ -210,21 +210,21 @@ namespace parser {
     if (!isStatement(active_token.type)) {
       raiseError("parseIfBlock: Expected STMT");
     }
-    unique_ptr<CodeBlockAST> true_branch = parseCodeBlock();
+    PtrCodeBlockAST true_branch = parseCodeBlock();
 
     if (active_token.type == ELSE) {
       getNextToken(); // Consume ELSE
       if (active_token.type != LBRA) {
         return raiseError("parseElseBlock: Expected '{'");
       }
-      unique_ptr<CodeBlockAST> false_branch = parseCodeBlock();
+      PtrCodeBlockAST false_branch = parseCodeBlock();
       return make_unique<IfBlockAST>(t, std::move(condition), std::move(true_branch), std::move(false_branch));
     }
 
     return make_unique<IfBlockAST>(t, std::move(condition), std::move(true_branch));
   }
 
-  static unique_ptr<WhileBlockAST> parseWhileBlock() {
+  static PtrWhileBlockAST parseWhileBlock() {
     TOKEN t = active_token;
     getNextToken(); // Consume WHILE
     if (active_token.type != LPAR) {
@@ -235,7 +235,7 @@ namespace parser {
     if (!isExpression(active_token.type)) {
       return raiseError("parseWhileBlock: Expected EXPR");
     }
-    unique_ptr<ExpressionAST> condition = parseExpression();
+    PtrExpressionAST condition = parseExpression();
 
     if (active_token.type != RPAR) {
       return raiseError("parseWhileBlock: Expected ')'");
@@ -245,17 +245,17 @@ namespace parser {
     if (!isStatement(active_token.type)) {
       return raiseError("parseWhileBlock: Expected STMT");
     }
-    unique_ptr<StatementAST> body = parseStatement();
+    PtrStatementAST body = parseStatement();
     return make_unique<WhileBlockAST>(t, std::move(condition), std::move(body));
   }
 
-  static unique_ptr<ReturnAST> parseReturnStatement() {
+  static PtrReturnAST parseReturnStatement() {
     TOKEN t = active_token;
     getNextToken(); // consume RETURN
     if (active_token.type == SC) {
       return make_unique<ReturnAST>(t);
     } else if (isExpression(active_token.type)) {
-      unique_ptr<ExpressionAST> body = parseExpression();
+      PtrExpressionAST body = parseExpression();
 
       if (active_token.type != SC) {
         return raiseError("parseReturnStatement: Expected ';'");
@@ -266,11 +266,11 @@ namespace parser {
     return raiseError("parseReturnStatement");
   }
 
-  static unique_ptr<CodeBlockAST> parseCodeBlock() {
+  static PtrCodeBlockAST parseCodeBlock() {
     TOKEN t = active_token;
     getNextToken(); // Consume {
-    vector<unique_ptr<VariableAST>> declarations = parseBlockDecls();
-    vector<unique_ptr<StatementAST>> statements = parseStatements();
+    vector<PtrVariableAST> declarations = parseBlockDecls();
+    vector<PtrStatementAST> statements = parseStatements();
     if (active_token.type != RBRA) {
       return raiseError("parseCodeBlock: Expected '}'");
     }
@@ -279,8 +279,8 @@ namespace parser {
   return make_unique<CodeBlockAST>(t, std::move(declarations), std::move(statements));
   }
 
-  static vector<unique_ptr<VariableAST>> parseBlockDecls() {
-    vector<unique_ptr<VariableAST>> declarations;
+  static vector<PtrVariableAST> parseBlockDecls() {
+    vector<PtrVariableAST> declarations;
 
     while (isVarType(active_token.type)) {
       auto type = active_token.type;
@@ -291,7 +291,7 @@ namespace parser {
         getNextToken(); // Consume IDENT
         if (active_token.type == SC) {
           getNextToken(); // Consume ;
-          unique_ptr<VariableAST> decl = parseVariable(token, type, ident);
+          PtrVariableAST decl = parseVariable(token, type, ident);
           declarations.push_back(std::move(decl));
         }
       }
@@ -303,25 +303,25 @@ namespace parser {
     }
 
     raiseError("parseBlockDecls");
-    return vector<unique_ptr<VariableAST>>();
+    return vector<PtrVariableAST>();
   }
 
-  static vector<unique_ptr<StatementAST>> parseStatements() {
-    vector<unique_ptr<StatementAST>> statements;
+  static vector<PtrStatementAST> parseStatements() {
+    vector<PtrStatementAST> statements;
 
     while (isStatement(active_token.type)) {
       if (active_token.type == SC) {
         getNextToken(); // Consume ; (Empty expression.)
         continue;
       }
-      unique_ptr<StatementAST> statement = parseStatement();
+      PtrStatementAST statement = parseStatement();
       statements.push_back(std::move(statement));
     }
 
     return statements;
   }
 
-  static unique_ptr<StatementAST> parseStatement() {
+  static PtrStatementAST parseStatement() {
     if (isExpression(active_token.type)) {
       return parseExpressionStmt();
     } else if (active_token.type == LBRA) {
@@ -337,9 +337,9 @@ namespace parser {
     return raiseError("parseStatement");
   }
 
-  static unique_ptr<ExpressionAST> parseExpressionStmt() {
+  static PtrExpressionAST parseExpressionStmt() {
     if (isExpression(active_token.type)) {
-      unique_ptr<ExpressionAST> e = parseExpression();
+      PtrExpressionAST e = parseExpression();
       if (active_token.type == SC) {
         getNextToken(); // Consume ;
         return e;
@@ -348,7 +348,7 @@ namespace parser {
     return raiseError("parseExpressionStmt");
   }
 
-  static unique_ptr<ExpressionAST> parseExpression() {
+  static PtrExpressionAST parseExpression() {
     if (active_token.type == IDENT) {
       TOKEN t = active_token;
       auto ident = lexer_data.identifier_val;
@@ -358,7 +358,7 @@ namespace parser {
         active_token.type == MINUS ||
         active_token.type == NOT ||
         active_token.type == LPAR) {
-      unique_ptr<ExpressionAST> first_operand = parseNegation();
+      PtrExpressionAST first_operand = parseNegation();
       if (isOperator(active_token.type) || active_token.type == LPAR) {
         return parseExpressionOp(0, std::move(first_operand));
       } else if (isExpressionEnd(active_token.type)) {
@@ -368,21 +368,21 @@ namespace parser {
     return raiseError("parseExpression");
   }
 
-  static unique_ptr<ExpressionAST> parseOptAssign(TOKEN token, const string &ident) {
+  static PtrExpressionAST parseOptAssign(TOKEN token, const string &ident) {
     if (active_token.type == ASSIGN) {
       getNextToken(); // Consume =
-      unique_ptr<ExpressionAST> assignment = parseExpression();
+      PtrExpressionAST assignment = parseExpression();
       return make_unique<AssignmentAST>(token, ident, std::move(assignment));
     } else if (isExpressionEnd(active_token.type) ||
         isOperator(active_token.type) || active_token.type == LPAR) {
-      unique_ptr<ExpressionAST> first_operand = parseIdentifier(token, ident);
+      PtrExpressionAST first_operand = parseIdentifier(token, ident);
       return parseExpressionOp(0, std::move(first_operand));
     }
 
     return raiseError("parseOptAssign");
   }
 
-  static unique_ptr<ExpressionAST> parseExpressionOp(int exprPrec, unique_ptr<ExpressionAST> lhs) {
+  static PtrExpressionAST parseExpressionOp(int exprPrec, PtrExpressionAST lhs) {
     while (true) {
       int token_prec = operator_precedence[active_token.type];
 
@@ -394,7 +394,7 @@ namespace parser {
       TOKEN op = active_token;
       getNextToken(); // Consume OPERATOR
 
-      unique_ptr<ExpressionAST> rhs = parseNegation(); // ParsePrimary() in LLVM tutorial implies atomic value
+      PtrExpressionAST rhs = parseNegation(); // ParsePrimary() in LLVM tutorial implies atomic value
       int next_prec = operator_precedence[active_token.type];
       if (token_prec < next_prec) {
         rhs = parseExpressionOp(token_prec + 1, std::move(rhs));
@@ -405,11 +405,11 @@ namespace parser {
     return lhs;
   }
 
-  static unique_ptr<ExpressionAST> parseNegation() {
+  static PtrExpressionAST parseNegation() {
     TOKEN op = active_token;
     if (op.type == MINUS || op.type == NOT) {
       getNextToken(); // Consume OPERATOR
-      unique_ptr<ExpressionAST> operand = parseNegation();
+      PtrExpressionAST operand = parseNegation();
       return make_unique<UnaryExpressionAST>(op, std::move(operand));
     } else if (isLiteral(op.type) ||
         op.type == IDENT ||
@@ -419,10 +419,10 @@ namespace parser {
     return raiseError("parseNegation");
   }
 
-  static unique_ptr<ExpressionAST> parseParens() {
+  static PtrExpressionAST parseParens() {
     if (active_token.type == LPAR) {
       getNextToken(); // Consume (
-      unique_ptr<ExpressionAST> expr = parseExpression();
+      PtrExpressionAST expr = parseExpression();
       if (active_token.type == RPAR) {
         getNextToken(); // Consume )
         return expr;
@@ -434,7 +434,7 @@ namespace parser {
     return raiseError("parseParens");
   }
 
-  static unique_ptr<ExpressionAST> parseAtomicValue() {
+  static PtrExpressionAST parseAtomicValue() {
     if (active_token.type == IDENT) {
       TOKEN t = active_token;
       string ident = lexer_data.identifier_val;
@@ -457,7 +457,7 @@ namespace parser {
     return raiseError("parseAtomicValue: Expected identifier or literal");
   }
 
-  static unique_ptr<ExpressionAST> parseIdentifier(TOKEN token, const string &ident) {
+  static PtrExpressionAST parseIdentifier(TOKEN token, const string &ident) {
     if (active_token.type == LPAR) {
       getNextToken(); // Consume (
       auto arguments = parseArguments();
@@ -472,16 +472,16 @@ namespace parser {
     return raiseError("parseIdentifier: Expected variable or function call");
   }
 
-  static vector<unique_ptr<ExpressionAST>> parseArguments() {
-    vector<unique_ptr<ExpressionAST>> arguments;
+  static vector<PtrExpressionAST> parseArguments() {
+    vector<PtrExpressionAST> arguments;
 
     if (isExpression(active_token.type)) {
-      unique_ptr<ExpressionAST> first_argument = parseExpression();
+      PtrExpressionAST first_argument = parseExpression();
       arguments.push_back(std::move(first_argument));
 
       while (active_token.type == COMMA) {
         getNextToken(); // Consume COMMA
-        unique_ptr<ExpressionAST> argument = parseExpression();
+        PtrExpressionAST argument = parseExpression();
         arguments.push_back(std::move(argument));
       }
     }
@@ -489,7 +489,7 @@ namespace parser {
     return arguments;
   }
 
-  static unique_ptr<VariableAST> parseVariable(TOKEN token, int token_type, const string &ident) {
+  static PtrVariableAST parseVariable(TOKEN token, int token_type, const string &ident) {
     MiniCType variable_type;
     switch (token_type) {
       case INT_TOK:
@@ -512,7 +512,7 @@ namespace parser {
   //
   
   static TOKEN getNextToken() {
-    lexer_data = lexer::updateData(lexer_data);
+    lexer_data = minic_lexer::updateData(lexer_data);
     return active_token = lexer_data.token;
   }
 

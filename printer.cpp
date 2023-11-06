@@ -5,8 +5,6 @@
 
 #include "visitor.h"
 
-using namespace abstract_syntax;
-
 using std::string;
 
 namespace minic_printer {

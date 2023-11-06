@@ -8,9 +8,9 @@ using std::vector;
 using std::unique_ptr;
 using std::make_unique;
 
-using namespace abstract_syntax;
+using namespace minic_lexer;
 
-namespace parser {
+namespace minic_parser {
 
   static std::map<int, int> operator_precedence = {
     {OR, 1},
