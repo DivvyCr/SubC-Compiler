@@ -1,3 +1,5 @@
+#include "code-generator.h"
+
 #include <map>
 #include <memory>
 #include <string>
@@ -20,7 +22,6 @@
 #include "llvm/IR/Verifier.h"
 
 #include "abstract-syntax.h"
-#include "code-generator.h"
 #include "visitor.h"
 
 using std::string;
@@ -105,7 +106,7 @@ namespace minic_code_generator {
       void* visit(VariableAST &node) {
         AllocaInst *variable_alloca;
         GlobalVariable *global_variable;
-        llvm::Type *variable_type;
+        Type *variable_type;
         string tmp = "Unknown variable: ";
         switch (node.getType()) {
           case INTEGER:
@@ -401,7 +402,7 @@ namespace minic_code_generator {
         }
 
         StatementGenerator.generateCode(*node.getBody());
-        llvm::verifyFunction(*llvm_function);
+        verifyFunction(*llvm_function);
         return;
       }
 
@@ -409,7 +410,7 @@ namespace minic_code_generator {
         for (auto &e : node.getExterns()) generatePrototype(*e);
         for (auto &g : node.getGlobals()) generateGlobal(*g);
         for (auto &f : node.getFunctions()) generateFunction(*f);
-        getModule()->print(llvm::outs(), nullptr);
+        getModule()->print(outs(), nullptr);
       }
 
     private:

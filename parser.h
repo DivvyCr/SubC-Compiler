@@ -1,10 +1,13 @@
 #include <map>
+#include <string>
+#include <tuple>
 
 #include "abstract-syntax.h"
 #include "lexer.h"
 
 using std::string;
 using std::vector;
+using std::tuple;
 using std::unique_ptr;
 using std::make_unique;
 
@@ -12,6 +15,9 @@ using namespace minic_lexer;
 
 namespace minic_parser {
 
+  // UTILITIES:
+  static TOKEN active_token; 
+  static LEXER_DATA lexer_data;
   static std::map<int, int> operator_precedence = {
     {OR, 1},
     {AND, 2},
@@ -21,22 +27,15 @@ namespace minic_parser {
     {MULT, 6}, {DIV, 6}, {MOD, 6}
   };
 
-  static LEXER_DATA lexer_data;
-  static TOKEN active_token; 
+  using DECLARATIONS = std::tuple<vector<PtrPrototypeAST>,
+        vector<PtrFunctionAST>, vector<PtrGlobalVariableAST>>;
 
-  PtrProgramAST startParse(FILE *input_file);
-
-  // Program:
-  static PtrProgramAST parseProgram();
-  static PtrPrototypeAST parseExtern();
-
-  using DeclPair = std::pair<vector<PtrFunctionAST>, vector<PtrGlobalVariableAST>>;
-
-  static DeclPair parseDeclList();
-  static DeclPair parseDecl(DeclPair decls);
-  static DeclPair parseDeclExt(int token_type, DeclPair decls);
-
-  static DeclPair parseFuncSpec(TOKEN token, const string &ident, MiniCType return_type, DeclPair decls);
+  // PARSING:
+  PtrProgramAST parseProgram(FILE *input_file);
+  static DECLARATIONS parseExtern(DECLARATIONS declarations);
+  static DECLARATIONS parseDeclaration(DECLARATIONS declarations);
+  static DECLARATIONS parseGlobalVariableOrFunction(DECLARATIONS declarations, int token_type);
+  static DECLARATIONS parseFunction(DECLARATIONS declarations, TOKEN token, const string &ident, MiniCType return_type);
   static vector<PtrVariableAST> parseParameters();
   static PtrVariableAST parseParameter();
 
@@ -64,6 +63,7 @@ namespace minic_parser {
   // Utilities:
   static TOKEN getNextToken();
 
+  static bool isExtern(int token_type);
   static bool isVarType(int token_type);
   static bool isAnyType(int token_type);
   static bool isLiteral(int token_type);
@@ -72,6 +72,7 @@ namespace minic_parser {
   static bool isExpressionEnd(int token_type);
   static bool isOperator(int token_type);
 
+  static MiniCType convertType(int token_type);
   static std::nullptr_t raiseError(const char *msg);
 
 }
