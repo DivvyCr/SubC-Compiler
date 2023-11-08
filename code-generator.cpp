@@ -104,6 +104,7 @@ namespace minic_code_generator {
       }
       void* visit(VariableAST &node) {
         AllocaInst *variable_alloca;
+        GlobalVariable *global_variable;
         llvm::Type *variable_type;
         string tmp = "Unknown variable: ";
         switch (node.getType()) {
@@ -118,8 +119,11 @@ namespace minic_code_generator {
             break;
           case UNKNOWN:
             variable_alloca = Symbols[node.getIdentifier()];
+            global_variable = getModule()->getNamedGlobal(node.getIdentifier());
             if (variable_alloca) {
               return getBuilder()->CreateLoad(variable_alloca->getAllocatedType(), variable_alloca, node.getIdentifier().c_str());
+            } else if (global_variable) {
+              return getBuilder()->CreateLoad(global_variable->getValueType(), global_variable);
             }
             tmp += node.getIdentifier();
             return raiseError(tmp.c_str());
@@ -135,16 +139,25 @@ namespace minic_code_generator {
       }
       void* visit(AssignmentAST &node) {
         AllocaInst *assignee = Symbols[node.getIdentifier()];
-        if (!assignee) return raiseError("Unknown variable for assignment.");
+        GlobalVariable *global_variable = getModule()->getNamedGlobal(node.getIdentifier());
 
         Value *expression = generateCode(*node.getAssignment());
         if (!expression) return nullptr;
-
-        if (assignee->getAllocatedType() != expression->getType()) {
-          return raiseError("Mismatched types on assignment.");
+        
+        if (assignee) {
+          if (assignee->getAllocatedType() != expression->getType()) {
+            return raiseError("Mismatched types on assignment.");
+          }
+          getBuilder()->CreateStore(expression, assignee);
+        } else if (global_variable) {
+          if (global_variable->getValueType() != expression->getType()) {
+            return raiseError("Mismatched types on assignment.");
+          }
+          getBuilder()->CreateStore(expression, global_variable);
+        } else {
+          return raiseError("Unknown variable for assignment.");
         }
 
-        getBuilder()->CreateStore(expression, assignee);
         return expression;
       }
       void* visit(FunctionCallAST &node) {
@@ -297,6 +310,24 @@ namespace minic_code_generator {
         : BaseCodeGenerator(llvmContext, llvmModule, irBuilder, symbols, functions),
         StatementGenerator(llvmContext, llvmModule, irBuilder, symbols, functions) {}
 
+      void generateGlobal(GlobalVariableAST &node) {
+        Type *variable_type;
+        switch (node.getVariable()->getType()) {
+          case INTEGER:
+            variable_type = Type::getInt32Ty(*getContext());
+            break;
+          case FLOAT:
+            variable_type = Type::getFloatTy(*getContext());
+            break;
+          case BOOL:
+            variable_type = Type::getInt1Ty(*getContext());
+            break;
+          default:
+            return;
+        }
+        getModule()->getOrInsertGlobal(node.getVariable()->getIdentifier(), variable_type);
+      }
+
       void generatePrototype(PrototypeAST &node) {
         vector<Type *> parameter_types;
         for (int i = 0; i < node.getParameters().size(); i++) {
@@ -376,7 +407,7 @@ namespace minic_code_generator {
 
       void generateProgram(const ProgramAST &node) {
         for (auto &e : node.getExterns()) generatePrototype(*e);
-        // for (auto &g : node.getGlobals()) generateGlobal(*g);
+        for (auto &g : node.getGlobals()) generateGlobal(*g);
         for (auto &f : node.getFunctions()) generateFunction(*f);
         getModule()->print(llvm::outs(), nullptr);
       }
