@@ -2,7 +2,7 @@
 
 namespace minic_parser {
 
-  unique_ptr<AST> startParse(FILE *input_file) {
+  PtrProgramAST startParse(FILE *input_file) {
     lexer_data.input_file = input_file;
     lexer_data.line_num = 1;
     lexer_data.column_num = 1;
@@ -337,12 +337,12 @@ namespace minic_parser {
     return raiseError("parseStatement");
   }
 
-  static PtrExpressionAST parseExpressionStmt() {
+  static PtrExpressionStatementAST parseExpressionStmt() {
     if (isExpression(active_token.type)) {
       PtrExpressionAST e = parseExpression();
       if (active_token.type == SC) {
         getNextToken(); // Consume ;
-        return e;
+        return make_unique<ExpressionStatementAST>(std::move(e));
       }
     }
     return raiseError("parseExpressionStmt");

@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include <functional>
 #include <iostream>
 #include <stdio.h>
 
@@ -19,66 +20,106 @@
 #include "llvm/IR/Verifier.h"
 
 #include "abstract-syntax.h"
+#include "code-generator.h"
 #include "visitor.h"
 
 using std::string;
 using std::vector;
 using std::unique_ptr;
 
+using namespace std::placeholders;
 using namespace llvm;
+
+using SymbolTable = std::map<string, AllocaInst *>;
+using FunctionTable = std::map<string, PrototypeAST *>;
 
 namespace minic_code_generator {
 
-  class CodeGenerator : public Visitor {
-    unique_ptr<LLVMContext> MiniCContext;
-    unique_ptr<Module> MiniCModule;
-    unique_ptr<IRBuilder<>> MiniCBuilder;
+  // typedef std::function<Value* (Value *, Value *, const Twine &)> IOpFunc;
+  typedef Value* (IRBuilder<>::*IOpFunc)(Value *, Value *, const Twine &);
+  typedef Value* (IRBuilder<>::*FOpFunc)(Value *, Value *, const Twine &, MDNode *);
 
-    std::map<string, AllocaInst *> named_values;
-    std::map<string, unique_ptr<PrototypeAST>> known_functions;
+  class BaseCodeGenerator {
+    public:
+      BaseCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable symbols, FunctionTable functions)
+        : TheContext(llvmContext), TheModule(llvmModule), TheBuilder(irBuilder), Symbols(symbols), Functions(functions) {}
+      LLVMContext *getContext() { return TheContext; }
+      Module *getModule() { return TheModule; }
+      IRBuilder<> *getBuilder() { return TheBuilder; }
+    protected:
+      SymbolTable Symbols;
+      FunctionTable Functions;
+    private:
+      LLVMContext *TheContext;
+      Module *TheModule;
+      IRBuilder<> *TheBuilder;
+  };
+
+  class ExpressionCodeGenerator : public ExpressionVisitor, public BaseCodeGenerator {
+    std::map<int, IOpFunc> iOps;
+    std::map<int, FOpFunc> fOps;
 
     public:
-      CodeGenerator() {
-        MiniCContext = std::make_unique<LLVMContext>();
-        MiniCModule = std::make_unique<Module>("MiniC", *MiniCContext);
-        MiniCBuilder = std::make_unique<IRBuilder<>>(*MiniCContext);
+      ExpressionCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable symbols, FunctionTable functions)
+        : BaseCodeGenerator(llvmContext, llvmModule, irBuilder, symbols, functions) {
+        iOps[PLUS] = &IRBuilder<>::CreateNSWAdd;
+        iOps[MINUS] = &IRBuilder<>::CreateNSWSub;
+        iOps[MULT] = &IRBuilder<>::CreateNSWMul;
+        // iOps[DIV] = &IRBuilder<>::CreateSDiv; // Signed Division
+        iOps[MOD] = &IRBuilder<>::CreateSRem; // Signed Remainder
+        // iOps[NOT] = ONLY FLOAT NEGATION EXISTS?
+        iOps[EQ] = &IRBuilder<>::CreateICmpEQ;
+        iOps[NE] = &IRBuilder<>::CreateICmpNE;
+        iOps[GT] = &IRBuilder<>::CreateICmpSGT;
+        iOps[GE] = &IRBuilder<>::CreateICmpSGE;
+        iOps[LT] = &IRBuilder<>::CreateICmpSLT;
+        iOps[LE] = &IRBuilder<>::CreateICmpSLE;
+
+        fOps[PLUS] = &IRBuilder<>::CreateFAdd;
+        fOps[MINUS] = &IRBuilder<>::CreateFSub;
+        fOps[MULT] = &IRBuilder<>::CreateFMul;
+        fOps[DIV] = &IRBuilder<>::CreateFDiv;
+        fOps[MOD] = &IRBuilder<>::CreateFRem;
+        // fOps[NOT] = &IRBuilder<>::CreateFNeg;
+        fOps[EQ] = &IRBuilder<>::CreateFCmpOEQ;
+        fOps[NE] = &IRBuilder<>::CreateFCmpONE;
+        fOps[GT] = &IRBuilder<>::CreateFCmpOGT;
+        fOps[GE] = &IRBuilder<>::CreateFCmpOGE;
+        fOps[LT] = &IRBuilder<>::CreateFCmpOLT;
+        fOps[LE] = &IRBuilder<>::CreateFCmpOLE;
       }
 
-      Value *generateCode(const AST &node) {
-        return reinterpret_cast<Value *>(const_cast<AST &>(node).dispatch(*this));
+      Value* generateCode(const ExpressionAST &node) {
+        return reinterpret_cast<Value *>(const_cast<ExpressionAST &>(node).dispatch(*this));
       }
 
       void* visit(IntAST &node) {
-        return ConstantInt::get(*MiniCContext, APInt(32, node.getValue(), true));
+        return ConstantInt::get(*getContext(), APInt(32, node.getValue(), true));
       }
       void* visit(FloatAST &node) {
-        return ConstantFP::get(*MiniCContext, APFloat(node.getValue()));
+        return ConstantFP::get(*getContext(), APFloat(node.getValue()));
       }
       void* visit(BoolAST &node) {
-        return ConstantInt::get(*MiniCContext, APInt(1, node.getValue(), false));
+        return ConstantInt::get(*getContext(), APInt(1, node.getValue(), false));
       }
       void* visit(VariableAST &node) {
         AllocaInst *variable_alloca;
-        GlobalVariable *global_variable;
         llvm::Type *variable_type;
         string tmp = "Unknown variable: ";
         switch (node.getType()) {
           case INTEGER:
-            variable_type = Type::getInt32Ty(*MiniCContext);
+            variable_type = Type::getInt32Ty(*getContext());
             break;
           case FLOAT:
-            variable_type = Type::getFloatTy(*MiniCContext);
+            variable_type = Type::getFloatTy(*getContext());
             break;
           case BOOL:
-            variable_type = Type::getInt1Ty(*MiniCContext);
+            variable_type = Type::getInt1Ty(*getContext());
             break;
           case UNKNOWN:
-            variable_alloca = named_values[node.getIdentifier()];
-            global_variable = MiniCModule->getNamedGlobal(node.getIdentifier());
+            variable_alloca = Symbols[node.getIdentifier()];
             if (variable_alloca) {
-              return MiniCBuilder->CreateLoad(variable_alloca->getAllocatedType(), variable_alloca, node.getIdentifier().c_str());
-            } else if (global_variable) {
-              return MiniCBuilder->CreateLoad(global_variable->getType(), global_variable);
+              return getBuilder()->CreateLoad(variable_alloca->getAllocatedType(), variable_alloca, node.getIdentifier().c_str());
             }
             tmp += node.getIdentifier();
             return raiseError(tmp.c_str());
@@ -87,36 +128,27 @@ namespace minic_code_generator {
             return nullptr;
         }
 
-        Function *llvm_parent_function = MiniCBuilder->GetInsertBlock()->getParent();
+        Function *llvm_parent_function = getBuilder()->GetInsertBlock()->getParent();
         variable_alloca = createEntryBlockAlloca(llvm_parent_function, variable_type, node.getIdentifier());
-        named_values[node.getIdentifier()] = variable_alloca;
+        Symbols[node.getIdentifier()] = variable_alloca;
         return variable_alloca;
       }
       void* visit(AssignmentAST &node) {
-        AllocaInst *assignee = named_values[node.getIdentifier()];
-        GlobalVariable *global_variable = MiniCModule->getNamedGlobal(node.getIdentifier());
+        AllocaInst *assignee = Symbols[node.getIdentifier()];
+        if (!assignee) return raiseError("Unknown variable for assignment.");
 
         Value *expression = generateCode(*node.getAssignment());
         if (!expression) return nullptr;
 
-        if (assignee) {
-          if (assignee->getAllocatedType() != expression->getType()) {
-            return raiseError("Mismatched types on assignment.");
-          }
-          MiniCBuilder->CreateStore(expression, assignee);
-        } else if (global_variable) {
-          if (global_variable->getValueType() != expression->getType()) {
-            return raiseError("Mismatched types on assignment.");
-          }
-          MiniCBuilder->CreateStore(expression, global_variable);
-        } else {
-          return raiseError("Unknown variable for assignment.");
+        if (assignee->getAllocatedType() != expression->getType()) {
+          return raiseError("Mismatched types on assignment.");
         }
 
+        getBuilder()->CreateStore(expression, assignee);
         return expression;
       }
       void* visit(FunctionCallAST &node) {
-        Function *llvm_call = getPrototypeFor(node.getIdentifier());
+        Function *llvm_call = getModule()->getFunction(node.getIdentifier());
         if (!llvm_call) return raiseError("Unknown function called.");
 
         if (node.getArguments().size() != llvm_call->arg_size()) {
@@ -129,7 +161,7 @@ namespace minic_code_generator {
           if (!arg) return nullptr;
           llvm_arguments.push_back(arg);
         }
-        return MiniCBuilder->CreateCall(llvm_call, llvm_arguments);
+        return getBuilder()->CreateCall(llvm_call, llvm_arguments);
       }
       void* visit(UnaryExpressionAST &node) {
         Value *expression = generateCode(*node.getExpression());
@@ -137,106 +169,152 @@ namespace minic_code_generator {
 
         switch (node.getOperator().type) {
           case MINUS:
-            return MiniCBuilder->CreateFNeg(expression);
+            return getBuilder()->CreateFNeg(expression);
           default:
             break;
         }
         return raiseError("Bad expression (Unary).");
       }
       void* visit(BinaryExpressionAST &node) {
-        Value *left_expression = generateCode(*node.getLeft());
-        if (!left_expression) return nullptr;
-        Value *right_expression = generateCode(*node.getRight());
-        if (!right_expression) return nullptr;
+        // Generate code for LHS and RHS:
+        Value *left = generateCode(*node.getLeft());
+        if (!left) return nullptr;
+        Value *right = generateCode(*node.getRight());
+        if (!right) return nullptr;
 
-        bool is_float_op = false;
-        Type *left_type = left_expression->getType();
-        Type *right_type = right_expression->getType();
+        // Determine whether it is an INTEGER or a FLOATING-POINT operation,
+        // and convert integers to floating-point if necessary:
+        bool is_float = false;
+        Type *left_type = left->getType();
+        Type *right_type = right->getType();
 
-        if (left_type->isFloatTy() && right_type->isFloatTy()) {
-          is_float_op = true;
-        } else if (left_type->isFloatTy() && right_type->isIntegerTy()) {
-          right_expression = MiniCBuilder->CreateSIToFP(right_expression, Type::getFloatTy(*MiniCContext), "conv");
-          is_float_op = true;
-        } else if (left_type->isIntegerTy() && right_type->isFloatTy()) {
-          left_expression = MiniCBuilder->CreateSIToFP(left_expression, Type::getFloatTy(*MiniCContext), "conv");
-          is_float_op = true;
-        } else if (left_expression->getType() != right_expression->getType()) {
-          return raiseError("Mismatched expression types.");
+        if (left_type->isFloatTy() || right_type->isFloatTy()) {
+          is_float = true;
+
+          if (left_type->isIntegerTy()) {
+            left = getBuilder()->CreateSIToFP(left, Type::getFloatTy(*getContext()), "convert");
+          }
+          if (right_type->isIntegerTy()) {
+            right = getBuilder()->CreateSIToFP(right, Type::getFloatTy(*getContext()), "convert");
+          }
         }
 
-        // NOTE: These operations take the FIRST ARGUMENT (ie. left-hand side)
-        // to determine the TYPE of the whole expression.
-        switch (node.getOperator().type) {
-          case PLUS:
-            return is_float_op ? MiniCBuilder->CreateFAdd(left_expression, right_expression)
-              : MiniCBuilder->CreateAdd(left_expression, right_expression);
-          case MULT:
-            return MiniCBuilder->CreateFMul(left_expression, right_expression);
-          default:
-            break;
-        }
-        return raiseError("Bad expression.");
+        if (left->getType() != right->getType()) return raiseError("Mismatched expression types.");
+
+        // Generate the appropriate operation instruction:
+        return is_float
+          ? (*getBuilder().*(fOps[node.getOperator().type]))(left, right, "", nullptr)
+          : (*getBuilder().*(iOps[node.getOperator().type]))(left, right, "");
       }
-      void* visit(CodeBlockAST &node) {
+  };
+
+  class StatementCodeGenerator : public StatementVisitor, public BaseCodeGenerator {
+    ExpressionCodeGenerator ExpressionGenerator;
+
+    public:
+      StatementCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable symbols, FunctionTable functions)
+        : BaseCodeGenerator(llvmContext, llvmModule, irBuilder, symbols, functions),
+        ExpressionGenerator(llvmContext, llvmModule, irBuilder, symbols, functions) {}
+
+      void generateCode(const StatementAST &node) {
+        const_cast<StatementAST &>(node).dispatch(*this);
+      }
+
+      void visit(ExpressionStatementAST &node) {
+        ExpressionGenerator.generateCode(*node.getExpression());
+      }
+      void visit(CodeBlockAST &node) {
         for (int i = 0; i < node.getDeclarations().size(); i++) { // Always VariableAST
-          Value *declaration = generateCode(*node.getDeclarations()[i]);
-          if (!declaration) return nullptr;
-        }
-        for (int i = 0; i < node.getStatements().size(); i++) {
-          Value *status = generateCode(*node.getStatements()[i]);
-          if (!status) return nullptr;
+          Value *status = ExpressionGenerator.generateCode(*node.getDeclarations()[i]);
+          // if (!status) return raiseError("Malformed declaration.");
         }
 
-        // Return non-nullptr Value to indicate success:
-        return ConstantInt::get(*MiniCContext, APInt(1, 1, false));
+        for (int i = 0; i < node.getStatements().size(); i++) generateCode(*node.getStatements()[i]);
       }
-      void* visit(IfBlockAST &node) {return nullptr;}
-      void* visit(WhileBlockAST &node) {return nullptr;}
-      void* visit(ReturnAST &node) {
-        Value *expression = generateCode(*node.getBody());
-        if (!expression) return raiseError("Bad return.");
-        MiniCBuilder->CreateRet(expression);
+      void visit(IfBlockAST &node) {
+        Function *parentFunction = getBuilder()->GetInsertBlock()->getParent();
+        BasicBlock *trueBlock = BasicBlock::Create(*getContext(), "if.true", parentFunction);
+        BasicBlock *falseBlock = BasicBlock::Create(*getContext(), "if.false", parentFunction);
+        BasicBlock *afterBlock = BasicBlock::Create(*getContext(), "if.after", parentFunction);
 
-        // Return non-nullptr Value to indicate success:
-        return ConstantInt::get(*MiniCContext, APInt(1, 1, false));
+        // Generate code for the condition:
+        Value *condition = ExpressionGenerator.generateCode(*node.getCondition());
+        if (!condition) return;
+        getBuilder()->CreateCondBr(condition, trueBlock, falseBlock);
+
+        // Generate code for the True branch:
+        getBuilder()->SetInsertPoint(trueBlock);
+        /*Value *trueExpression = */generateCode(*node.getTrueBranch());
+        // if (!trueExpression) return raiseError("Malformed true branch.");
+        getBuilder()->CreateBr(afterBlock);
+
+        // Generate code for the False branch:
+        getBuilder()->SetInsertPoint(falseBlock);
+        /*Value *falseExpression = */generateCode(*node.getFalseBranch());
+        // if (!falseExpression) return raiseError("Malformed false branch.");
+        getBuilder()->CreateBr(afterBlock);
+
+        // Place subsequent insertion to after block:
+        getBuilder()->SetInsertPoint(afterBlock);
       }
-      void* visit(GlobalVariableAST &node) {
-        unique_ptr<VariableAST> v = std::move(node.getVariable());
-        Type *variable_type;
-        switch (v->getType()) {
-          case INTEGER:
-            variable_type = Type::getInt32Ty(*MiniCContext);
-            break;
-          case FLOAT:
-            variable_type = Type::getFloatTy(*MiniCContext);
-            break;
-          case BOOL:
-            variable_type = Type::getInt1Ty(*MiniCContext);
-            break;
-          default:
-            return raiseError("GlobalVariable without type");
-        }
-        return MiniCModule->getOrInsertGlobal(v->getIdentifier(), variable_type);
+      void visit(WhileBlockAST &node) {
+        Function *parentFunction = getBuilder()->GetInsertBlock()->getParent();
+        BasicBlock *condBlock = BasicBlock::Create(*getContext(), "while.cond", parentFunction);
+        BasicBlock *loopBlock = BasicBlock::Create(*getContext(), "while.body", parentFunction);
+        BasicBlock *afterBlock= BasicBlock::Create(*getContext(), "while.after", parentFunction);
+
+        // Unconditionally enter the condition upon first encountering the while loop:
+        getBuilder()->CreateBr(condBlock);
+ 
+        // Generate code for the condition:
+        getBuilder()->SetInsertPoint(condBlock);
+        Value *condition = ExpressionGenerator.generateCode(*node.getCondition());
+        if (!condition) return;
+        getBuilder()->CreateCondBr(condition, loopBlock, afterBlock);
+
+        // Generate code for the body:
+        getBuilder()->SetInsertPoint(loopBlock);
+        /*Value *bodyValue = */generateCode(*node.getBody());
+        //if (!bodyValue) return raiseError("Malformed while body.");
+        getBuilder()->CreateBr(condBlock);
+        loopBlock = getBuilder()->GetInsertBlock();
+
+        // Place subsequent insertion to after block:
+        getBuilder()->SetInsertPoint(afterBlock);
       }
-      void* visit(PrototypeAST &node) {
+      void visit(ReturnAST &node) {
+        Value *expression = ExpressionGenerator.generateCode(*node.getBody());
+        if (!expression) return;
+        getBuilder()->CreateRet(expression);
+      }
+  };
+
+  class ProgramCodeGenerator : public BaseCodeGenerator {
+    StatementCodeGenerator StatementGenerator;
+
+    public:
+      ProgramCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable symbols, FunctionTable functions)
+        : BaseCodeGenerator(llvmContext, llvmModule, irBuilder, symbols, functions),
+        StatementGenerator(llvmContext, llvmModule, irBuilder, symbols, functions) {}
+
+      void generatePrototype(PrototypeAST &node) {
         vector<Type *> parameter_types;
         for (int i = 0; i < node.getParameters().size(); i++) {
           MiniCType parameter_minictype = node.getParameters()[i]->getType();
           Type *parameter_type;
           switch (parameter_minictype) {
             case INTEGER:
-              parameter_type = Type::getInt32Ty(*MiniCContext);
+              parameter_type = Type::getInt32Ty(*getContext());
               break;
             case FLOAT:
-              parameter_type = Type::getFloatTy(*MiniCContext);
+              parameter_type = Type::getFloatTy(*getContext());
               break;
             case BOOL:
-              parameter_type = Type::getInt1Ty(*MiniCContext);
+              parameter_type = Type::getInt1Ty(*getContext());
               break;
             default:
               // Impossible to reach here due to parser.
-              return nullptr;
+              return;
           }
           parameter_types.push_back(parameter_type);    
         }
@@ -244,100 +322,102 @@ namespace minic_code_generator {
         Type *return_type;
         switch (node.getReturnType()) {
           case INTEGER:
-            return_type = Type::getInt32Ty(*MiniCContext);
+            return_type = Type::getInt32Ty(*getContext());
             break;
           case FLOAT:
-            return_type = Type::getFloatTy(*MiniCContext);
+            return_type = Type::getFloatTy(*getContext());
             break;
           case BOOL:
-            return_type = Type::getInt1Ty(*MiniCContext);
+            return_type = Type::getInt1Ty(*getContext());
             break;
           case VOID:
-            return_type = Type::getVoidTy(*MiniCContext);
+            return_type = Type::getVoidTy(*getContext());
             break;
           default:
             // Impossible to reach here due to parser.
-            return nullptr;
+            return;
         }
 
         FunctionType *function_type = FunctionType::get(return_type, parameter_types, false);
 
-        Function *function = Function::Create(function_type, Function::ExternalLinkage, node.getIdentifier(), MiniCModule.get());
+        Function *function = Function::Create(function_type, Function::ExternalLinkage, node.getIdentifier(), getModule());
         // Necessary to name arguments, in order to make it easier to use them inside function body.
         int i = 0; 
         for (auto &arg : function->args()) {
           arg.setName(node.getParameters()[i++]->getIdentifier());
         }
 
-        return function;
+        Functions[node.getIdentifier()] = &node;
+        return;
       }
-      void* visit(FunctionAST &node) {
+
+      void generateFunction(FunctionAST &node) {
         auto &prototype = *node.getPrototype();
         string function_name = node.getPrototype()->getIdentifier();
-        known_functions[function_name] = std::move(node.getPrototype());
+        Functions[function_name] = &*node.getPrototype();
         Function *llvm_function = getPrototypeFor(function_name);
 
-        if (!llvm_function) return raiseError("Function code generator error.");
+        if (!llvm_function) return;
 
-        BasicBlock *llvm_block = BasicBlock::Create(*MiniCContext, "entry", llvm_function);
-        MiniCBuilder->SetInsertPoint(llvm_block);
+        BasicBlock *llvm_block = BasicBlock::Create(*getContext(), "entry", llvm_function);
+        getBuilder()->SetInsertPoint(llvm_block);
 
-        named_values.clear();
+        Symbols.clear();
         for (auto &llvm_argument : llvm_function->args()) {
           AllocaInst *argument_alloca = createEntryBlockAlloca(llvm_function, llvm_argument.getType(), llvm_argument.getName());
-          MiniCBuilder->CreateStore(&llvm_argument, argument_alloca);
-          named_values[string(llvm_argument.getName())] = argument_alloca;
+          getBuilder()->CreateStore(&llvm_argument, argument_alloca);
+          Symbols[string(llvm_argument.getName())] = argument_alloca;
         }
 
-        Value *status = generateCode(*node.getBody());
-        if (status) {
-          llvm::verifyFunction(*llvm_function);
-          return llvm_function;
-        }
-
-        return raiseError("Function code generator error (body).");
+        StatementGenerator.generateCode(*node.getBody());
+        llvm::verifyFunction(*llvm_function);
+        return;
       }
-      void* visit(ProgramAST &node) {
-        for (int i = 0; i < node.getExterns().size(); i++) {
-          generateCode(*node.getExterns()[i]);
-          known_functions[node.getExterns()[i]->getIdentifier()] = std::move(node.getExterns()[i]);
-        }
-        for (int i = 0; i < node.getGlobals().size(); i++) {
-          generateCode(*node.getGlobals()[i]);
-        }
-        for (int i = 0; i < node.getFunctions().size(); i++) {
-          generateCode(*node.getFunctions()[i]);
-        }
-        MiniCModule->print(llvm::outs(), nullptr);
-        return ConstantInt::get(*MiniCContext, APInt());
+
+      void generateProgram(const ProgramAST &node) {
+        for (auto &e : node.getExterns()) generatePrototype(*e);
+        // for (auto &g : node.getGlobals()) generateGlobal(*g);
+        for (auto &f : node.getFunctions()) generateFunction(*f);
+        getModule()->print(llvm::outs(), nullptr);
       }
 
     private:
-      std::nullptr_t raiseError(const char* msg) {
-        fprintf(stderr, "Error: %s\n", msg);
-        return nullptr;
-      }
-
-      AllocaInst *createEntryBlockAlloca(Function *function,
-          Type *variable_type, StringRef variable_name) {
-        IRBuilder<> tmp_builder(&function->getEntryBlock(), function->getEntryBlock().begin());
-        AllocaInst *variable_alloca = tmp_builder.CreateAlloca(variable_type, nullptr, variable_name);
-        return variable_alloca;
-      }
-
       Function *getPrototypeFor(const string &identifier) {
-        Function *function = MiniCModule->getFunction(identifier);
+        Function *function = getModule()->getFunction(identifier);
         if (function) { return function; }
 
-        auto prototype_iterator = known_functions.find(identifier);
-        if (prototype_iterator != known_functions.end()) {
+        auto prototype_iterator = Functions.find(identifier);
+        if (prototype_iterator != Functions.end()) {
           // Cannot return directly from generateCode(..):
-          generateCode(*prototype_iterator->second);
-          return MiniCModule->getFunction(identifier);
+          generatePrototype(*prototype_iterator->second);
+          return getModule()->getFunction(identifier);
         }
 
         return raiseError("Function not known.");
       }
   };
 
+  void generate(const ProgramAST &node) {
+    LLVMContext MiniCContext;
+    unique_ptr<Module> MiniCModule = std::make_unique<Module>("MiniC", *&MiniCContext);
+    IRBuilder<> MiniCBuilder(MiniCContext);
+
+    SymbolTable ss;
+    FunctionTable fs;
+
+    ProgramCodeGenerator(&MiniCContext, MiniCModule.get(), &MiniCBuilder, ss, fs).generateProgram(node);
+  }
+
+  AllocaInst *createEntryBlockAlloca(Function *function, Type *variable_type, StringRef variable_name) {
+    IRBuilder<> tmp_builder(&function->getEntryBlock(), function->getEntryBlock().begin());
+    AllocaInst *variable_alloca = tmp_builder.CreateAlloca(variable_type, nullptr, variable_name);
+    return variable_alloca;
+  }
+
+  std::nullptr_t raiseError(const char* msg) {
+    fprintf(stderr, "Error: %s\n", msg);
+    return nullptr;
+  }
+
 }
+
