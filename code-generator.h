@@ -6,6 +6,8 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 
+#include "abstract-syntax.h"
+
 using namespace llvm;
 
 namespace minic_code_generator {

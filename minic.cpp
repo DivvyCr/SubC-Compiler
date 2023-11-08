@@ -9,7 +9,11 @@
 #include "printer.h"
 #include "code-generator.h"
 
+using std::cout;
+
+using minic_parser::parseProgram;
 using minic_printer::operator<<;
+using minic_code_generator::generate;
 
 int main(int argc, char **argv) {
   if (argc != 2) {
@@ -19,16 +23,16 @@ int main(int argc, char **argv) {
 
   // Initialise:
   FILE *input_file = fopen(argv[1], "r");
-  if (input_file == NULL) {
-    perror("Error opening file");
-  }
+  if (input_file == NULL) perror("File error");
 
-  // Run parser:
-  unique_ptr<ProgramAST> root = minic_parser::startParse(input_file);
-  // Print AST:
-  std::cout << *root << "\n";
-  // Generate code:
-  minic_code_generator::generate(*root);
+  // Run parser, print the AST, and generate the IR:
+  PtrProgramAST root = parseProgram(input_file);
+  if (root) {
+    cout << *root << "\n";
+    generate(*root);
+  } else {
+    fprintf(stderr, "Parsing error!\n");
+  }
 
   // Terminate:
   fclose(input_file);

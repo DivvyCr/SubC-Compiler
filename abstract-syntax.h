@@ -77,10 +77,8 @@ using PtrProgramAST = unique_ptr<ProgramAST>;
 using PtrExpressionAST = unique_ptr<ExpressionAST>;
 using PtrStatementAST = unique_ptr<StatementAST>;
 
-// TODO: Export TOKEN to top-level AST classes?
-
-class ExpressionAST {
-  // This class represents code constructs that hold some value.
+// This class represents code constructs that hold some value.
+class ExpressionAST { 
   public:
     virtual ~ExpressionAST() {}
     virtual void *dispatch(ExpressionVisitor &v) = 0;
@@ -192,8 +190,8 @@ class BinaryExpressionAST : public ExpressionAST {
     PtrExpressionAST Left, Right;
 };
 
+// This class represents code constructs that serve to structure.
 class StatementAST {
-  // This class represents code constructs that serve to structure.
   public:
     virtual ~StatementAST() {}
     virtual void dispatch(StatementVisitor &v) = 0;
