@@ -10,23 +10,38 @@ using std::string;
 namespace minic_printer {
 
   static const string TREE_INDENT = "  ";
+  string CurrentPrefix = "";
 
-  class Printer : public Visitor {
+  class Printer : public ExpressionVisitor, public StatementVisitor {
     std::ostream &Out;
-    string CurrentPrefix;
 
     public:
       Printer(std::ostream &out) : Out(out) {}
 
-    void print(const AST &node) {
-      // New line, unless first print.
-      if (!CurrentPrefix.empty()) Out << "\n";
-      // Indent:
-      CurrentPrefix = CurrentPrefix + TREE_INDENT;
+    void print(const ExpressionAST &node, bool deepen = true) {
+      if (deepen) {
+        Out << "\n";
+        CurrentPrefix = CurrentPrefix + TREE_INDENT;
+      }
       // Visit node:
-      const_cast<AST &>(node).dispatch(*this);
+      const_cast<ExpressionAST &>(node).dispatch(*this);
       // Unindent:
-      CurrentPrefix.erase(0, TREE_INDENT.size()); // NOTE: Erases characters from the string START.
+      if (deepen) {
+        CurrentPrefix.erase(0, TREE_INDENT.size()); // NOTE: Erases characters from the string START.
+      }
+    }
+
+    void print(const StatementAST &node, bool deepen = true) {
+      if (deepen) {
+        Out << "\n";
+        CurrentPrefix = CurrentPrefix + TREE_INDENT;
+      }
+      // Visit node:
+      const_cast<StatementAST &>(node).dispatch(*this);
+      // Unindent:
+      if (deepen) {
+        CurrentPrefix.erase(0, TREE_INDENT.size()); // NOTE: Erases characters from the string START.
+      }
     }
 
     void* visit(IntAST &node) override {
@@ -83,61 +98,64 @@ namespace minic_printer {
       print(*node.getRight());
       return nullptr;
     }
-    void* visit(CodeBlockAST &node) override {
+    void visit(ExpressionStatementAST &node) override {
+      print(*node.getExpression(), false);
+    }
+    void visit(CodeBlockAST &node) override {
       Out << CurrentPrefix << "Block:";
       for (auto &decl : node.getDeclarations()) print(*decl);
       for (auto &stmt : node.getStatements()) print(*stmt);
-      return nullptr;
     }
-    void* visit(IfBlockAST &node) override {
+    void visit(IfBlockAST &node) override {
       Out << CurrentPrefix << "IF:";
       print(*node.getCondition());
       print(*node.getTrueBranch());
       if (node.getFalseBranch()) {
         print(*node.getFalseBranch());
       }
-      return nullptr;
     }
-    void* visit(WhileBlockAST &node) override {
+    void visit(WhileBlockAST &node) override {
       Out << CurrentPrefix << "WHILE:";
       print(*node.getCondition());
       print(*node.getBody());
-      return nullptr;
     }
-    void* visit(ReturnAST &node) override {
+    void visit(ReturnAST &node) override {
       Out << CurrentPrefix << "RETURN";
       if (node.getBody()) {
         Out << ":";
         print(*node.getBody());
       }
-      return nullptr;
-    }
-    void* visit(GlobalVariableAST &node) override {
-      print(*node.getVariable());
-      return nullptr;
-    }
-    void* visit(PrototypeAST &node) override {
-      Out << CurrentPrefix << "Prototype: " << node.getIdentifier();
-      for (auto &param : node.getParameters()) print(*param);
-      return nullptr;
-    }
-    void* visit(FunctionAST &node) override {
-      Out << CurrentPrefix << "Function:";
-      print(*node.getPrototype());
-      print(*node.getBody());
-      return nullptr;
-    }
-    void* visit(ProgramAST &node) override {
-      Out << CurrentPrefix << "Program:";
-      for (auto &ex : node.getExterns()) print(*ex);
-      for (auto &f : node.getFunctions()) print(*f);
-      return nullptr;
     }
 
   };
 
-  std::ostream &operator<<(std::ostream &out, const AST &node) {
-    Printer(out).print(node); // TODO: Why doesn't this create an object on every invocation?
+  // TODO: Does each printer constructor create a copy?
+
+  std::ostream &operator<<(std::ostream &out, const GlobalVariableAST &node) {
+    out << "\nGlobal ";
+    Printer(out).print(*node.getVariable(), false);
+    return out;
+  }
+
+  std::ostream &operator<<(std::ostream &out, const PrototypeAST &node) {
+    out << "\n" << CurrentPrefix << "Prototype: " << node.getIdentifier();
+    for (auto &param : node.getParameters()) Printer(out).print(*param);
+    return out;
+  }
+
+  std::ostream &operator<<(std::ostream &out, const FunctionAST &node) {
+    out << "\n" << CurrentPrefix << "Function:";
+    CurrentPrefix = CurrentPrefix + TREE_INDENT;
+    out << *node.getPrototype();
+    CurrentPrefix.erase(0, TREE_INDENT.size()); // NOTE: Erases characters from the string START.
+    Printer(out).print(*node.getBody());
+    return out;
+  }
+
+  std::ostream &operator<<(std::ostream &out, const ProgramAST &node) {
+    for (auto &e : node.getExterns()) out << *e;
+    for (auto &g : node.getGlobals()) out << *g;
+    for (auto &f : node.getFunctions()) out << *f;
     return out;
   }
 
