@@ -89,7 +89,7 @@ class IntAST : public ExpressionAST {
     IntAST(TOKEN token, int value)
       : Token(token), Value(value) {}
     void *dispatch(ExpressionVisitor &visitor) override { return visitor.visit(*this); }
-    int getValue() const { return Value; }
+    const int getValue() const { return Value; }
   private:
     TOKEN Token;
     int Value;
@@ -100,7 +100,7 @@ class FloatAST : public ExpressionAST {
     FloatAST(TOKEN token, float value)
       : Token(token), Value(value) {}
     void *dispatch(ExpressionVisitor &visitor) override { return visitor.visit(*this); }
-    float getValue() const { return Value; }
+    const float getValue() const { return Value; }
   private:
     TOKEN Token;
     float Value;
@@ -111,7 +111,7 @@ class BoolAST : public ExpressionAST {
     BoolAST(TOKEN token, bool value)
       : Token(token), Value(value) {}
     void *dispatch(ExpressionVisitor &visitor) override { return visitor.visit(*this); }
-    bool getValue() const { return Value; }
+    const bool getValue() const { return Value; }
   private:
     TOKEN Token;
     bool Value;
