@@ -18,7 +18,7 @@ namespace minic_parser {
     while (isAnyType(active_token.type)) declarations = parseDeclaration(std::move(declarations));
 
     if (active_token.type != EOF_TOK || is_error) {
-      return raiseError("parseProgram: Malformed top-level declaration.");
+      return propagateError("parseProgram: Error");
     }
 
     return make_unique<ProgramAST>(
@@ -34,7 +34,6 @@ namespace minic_parser {
     // RETURN TYPE:
     if (!isAnyType(active_token.type)) {
       raiseError("parseExtern: Expected TYPE");
-      is_error = true;
       return decls; // TODO: Better return.
     }
     MiniCType return_type = convertType(active_token.type);
@@ -43,7 +42,6 @@ namespace minic_parser {
     // IDENTIFIER:
     if (active_token.type != IDENT) {
       raiseError("parseExtern: Expected identifier (for an extern)");
-      is_error = true;
       return decls; // TODO: Better return.
     }
     string identifier = lexer_data.identifier_val;
@@ -52,16 +50,18 @@ namespace minic_parser {
     // PARAMETERS:
     if (active_token.type != LPAR) {
       raiseError("parseExtern: Expected '('");
-      is_error = true;
       return decls; // TODO: Better return.
     }
     getNextToken();
 
     vector<PtrVariableAST> parameters = parseParameters();
+    if (is_error) {
+      propagateError("parseExtern: Error parsing parameters");
+      return decls;
+    }
 
     if (active_token.type != RPAR) {
       raiseError("parseExtern: Expected ')'");
-      is_error = true;
       return decls; // TODO: Better return.
     }
     getNextToken();
@@ -69,7 +69,6 @@ namespace minic_parser {
     // EOL:
     if (active_token.type != SC) {
       raiseError("parseExtern: Expected ';'");
-      is_error = true;
       return decls; // TODO: Better return.
     }
     getNextToken();
@@ -88,7 +87,6 @@ namespace minic_parser {
     } else if (decl_type == VOID_TOK) {
       if (active_token.type != IDENT) {
         raiseError("parseDeclaration: Expected identifier (for function)");
-        is_error = true;
         return decls; // TODO: Better return.
       }
       TOKEN token = active_token;
@@ -103,7 +101,6 @@ namespace minic_parser {
   static DECLARATIONS parseGlobalVariableOrFunction(DECLARATIONS decls, int token_type) {
     if (active_token.type != IDENT) {
       raiseError("parseGlobalVariableOrFunction: Expected identifier (for global variable or function)");
-      is_error = true;
       return decls; // TODO: Better return.
     }
     TOKEN token = active_token;
@@ -113,23 +110,38 @@ namespace minic_parser {
     if (active_token.type == SC) {
       getNextToken(); // Consume ;
       PtrVariableAST variable = parseVariable(token, token_type, identifier);
+      if (is_error) {
+        propagateError("parseGlobalVariableOrFunction: Error parsing variable declaration");
+        return decls;
+      }
       PtrGlobalVariableAST global = std::make_unique<GlobalVariableAST>(std::move(variable));
       std::get<2>(decls).push_back(std::move(global));
       return decls;
     } else if (active_token.type == LPAR) {
       MiniCType return_type = convertType(token_type); // NOTE: We passed isVarType(..) check prior.
-      parseFunction(std::move(decls), token, identifier, return_type);
-      return decls;
+      return parseFunction(std::move(decls), token, identifier, return_type);
     }
-    is_error = true;
+    raiseError("parseGlobalVariableOrFunction: Expected ';' or '('");
     return decls; // TODO: Better return.
   }
 
   static DECLARATIONS parseFunction(DECLARATIONS decls, TOKEN token, const string &identifier, MiniCType return_type) {
     getNextToken(); // Consume (
     vector<PtrVariableAST> parameters = parseParameters();
+    if (is_error) {
+      propagateError("parseFunction: Error parsing parameters");
+      return decls;
+    }
+    if (active_token.type != RPAR) {
+      raiseError("parseFunction: Expected ')'");
+      return decls;
+    }
     getNextToken(); // Consume )
     PtrCodeBlockAST body = parseCodeBlock();
+    if (!body || is_error) {
+      propagateError("parseFunction: Error parsing body");
+      return decls;
+    }
 
     PtrPrototypeAST prototype = make_unique<PrototypeAST>(token, identifier, return_type, std::move(parameters));
     PtrFunctionAST function = make_unique<FunctionAST>(token, std::move(prototype), std::move(body));
@@ -142,11 +154,19 @@ namespace minic_parser {
 
     if (isVarType(active_token.type)) {
       PtrVariableAST first_parameter = parseParameter();
-      parameters.push_back(std::move(parseParameter()));
+      if (!first_parameter) {
+        raiseError("parseParameters: Error parsing parameter");
+        return parameters;
+      }
+      parameters.push_back(std::move(first_parameter));
 
       while (active_token.type == COMMA) {
         getNextToken(); // Consume COMMA
         PtrVariableAST next_parameter = parseParameter();
+        if (!next_parameter) {
+          raiseError("parseParameters: Error parsing parameters");
+          return parameters;
+        }
         parameters.push_back(std::move(next_parameter));
       }
     } else if (active_token.type == VOID_TOK) {
@@ -157,8 +177,12 @@ namespace minic_parser {
   }
 
   static PtrVariableAST parseParameter() {
+    if (!isVarType(active_token.type)) {
+      return raiseError("parseParameter: Expected TYPE");
+    }
     int token_type = active_token.type;
     getNextToken(); // Consume TYPE
+
     if (active_token.type != IDENT) {
       return raiseError("parseParameter: Expected identifier (for parameter)");
     }
@@ -181,6 +205,9 @@ namespace minic_parser {
       return raiseError("parseIfBlock: Expected EXPR");
     }
     PtrExpressionAST condition = parseExpression();
+    if (!condition || is_error) {
+      return propagateError("parseIfBlock: Error parsing condition");
+    }
 
     if (active_token.type != RPAR) {
       return raiseError("parseIfBlock: Expected ')'");
@@ -191,6 +218,9 @@ namespace minic_parser {
       raiseError("parseIfBlock: Expected STMT");
     }
     PtrCodeBlockAST true_branch = parseCodeBlock();
+    if (!true_branch || is_error) {
+      return propagateError("parseIfBlock: Error parsing true branch");
+    }
 
     if (active_token.type == ELSE) {
       getNextToken(); // Consume ELSE
@@ -198,6 +228,9 @@ namespace minic_parser {
         return raiseError("parseElseBlock: Expected '{'");
       }
       PtrCodeBlockAST false_branch = parseCodeBlock();
+      if (!false_branch || is_error) {
+        return propagateError("parseIfBlock: Error parsing false branch");
+      }
       return make_unique<IfBlockAST>(token, std::move(condition), std::move(true_branch), std::move(false_branch));
     }
 
@@ -216,6 +249,9 @@ namespace minic_parser {
       return raiseError("parseWhileBlock: Expected EXPR");
     }
     PtrExpressionAST condition = parseExpression();
+    if (!condition || is_error) {
+      return propagateError("parseWhileBlock: Error parsing condition");
+    }
 
     if (active_token.type != RPAR) {
       return raiseError("parseWhileBlock: Expected ')'");
@@ -226,6 +262,9 @@ namespace minic_parser {
       return raiseError("parseWhileBlock: Expected STMT");
     }
     PtrStatementAST body = parseStatement();
+    if (!body || is_error) {
+      return propagateError("parseWhileBlock: Error parsing while-loop body");
+    }
     return make_unique<WhileBlockAST>(token, std::move(condition), std::move(body));
   }
 
@@ -236,7 +275,9 @@ namespace minic_parser {
       return make_unique<ReturnAST>(token);
     } else if (isExpression(active_token.type)) {
       PtrExpressionAST body = parseExpression();
-
+      if (!body || is_error) {
+        return propagateError("parseReturnStatement: Error parsing return body");
+      }
       if (active_token.type != SC) {
         return raiseError("parseReturnStatement: Expected ';'");
       }
@@ -250,7 +291,13 @@ namespace minic_parser {
     TOKEN token = active_token;
     getNextToken(); // Consume {
     vector<PtrVariableAST> declarations = parseBlockDecls();
+    if (is_error) {
+      return propagateError("parseCodeBlock: Error parsing declarations");
+    }
     vector<PtrStatementAST> statements = parseStatements();
+    if (is_error) {
+      return propagateError("parseCodeBlock: Error parsing statements");
+    }
     if (active_token.type != RBRA) {
       return raiseError("parseCodeBlock: Expected '}'");
     }
@@ -272,11 +319,18 @@ namespace minic_parser {
       TOKEN token = active_token;
       string identifier = lexer_data.identifier_val;
       getNextToken(); // Consume IDENT
-      if (active_token.type == SC) {
-        getNextToken(); // Consume ;
-        PtrVariableAST decl = parseVariable(token, token_type, identifier);
-        declarations.push_back(std::move(decl));
+
+      if (active_token.type != SC) {
+        raiseError("parseBlockDecls: Expected ';'");
+        return declarations;
       }
+      getNextToken(); // Consume ;
+      PtrVariableAST decl = parseVariable(token, token_type, identifier);
+      if (!decl || is_error) {
+        propagateError("parseBlockDecls: Error parsing variable declaration");
+        return declarations;
+      }
+      declarations.push_back(std::move(decl));
     }
 
     if (isStatement(active_token.type) ||
@@ -297,6 +351,10 @@ namespace minic_parser {
         continue;
       }
       PtrStatementAST statement = parseStatement();
+      if (!statement || is_error) {
+        propagateError("parseStatements: Error parsing statement");
+        return statements;
+      }
       statements.push_back(std::move(statement));
     }
 
@@ -322,10 +380,14 @@ namespace minic_parser {
   static PtrExpressionStatementAST parseExpressionStmt() {
     if (isExpression(active_token.type)) {
       PtrExpressionAST e = parseExpression();
-      if (active_token.type == SC) {
-        getNextToken(); // Consume ;
-        return make_unique<ExpressionStatementAST>(std::move(e));
+      if (!e || is_error) {
+        return propagateError("parseExpressionStmt: Error parsing expression");
       }
+      if (active_token.type != SC) {
+        return raiseError("parseExpressionStmt: Expected ';'");
+      }
+      getNextToken(); // Consume ;
+      return make_unique<ExpressionStatementAST>(std::move(e));
     }
     return raiseError("parseExpressionStmt: Expected an expression ending in ';'");
   }
@@ -341,6 +403,9 @@ namespace minic_parser {
         active_token.type == NOT ||
         active_token.type == LPAR) {
       PtrExpressionAST first_operand = parseNegation();
+      if (!first_operand || is_error) {
+        return propagateError("parseExpression: Error parsing first operand");
+      }
       if (isOperator(active_token.type) || active_token.type == LPAR) {
         return parseExpressionOp(0, std::move(first_operand));
       } else if (isExpressionEnd(active_token.type)) {
@@ -354,10 +419,16 @@ namespace minic_parser {
     if (active_token.type == ASSIGN) {
       getNextToken(); // Consume =
       PtrExpressionAST assignment = parseExpression();
+      if (!assignment || is_error) {
+        return propagateError("parseOptAssign: Error parsing assignment expression");
+      }
       return make_unique<AssignmentAST>(token, ident, std::move(assignment));
     } else if (isExpressionEnd(active_token.type) ||
         isOperator(active_token.type) || active_token.type == LPAR) {
       PtrExpressionAST first_operand = parseIdentifier(token, ident);
+      if (!first_operand || is_error) {
+        return propagateError("parseOptAssign: Error parsing first operand");
+      }
       return parseExpressionOp(0, std::move(first_operand));
     }
 
@@ -376,9 +447,15 @@ namespace minic_parser {
       getNextToken(); // Consume OPERATOR
 
       PtrExpressionAST rhs = parseNegation(); // ParsePrimary() in LLVM tutorial implies atomic value
+      if (!rhs || is_error) {
+        return propagateError("parseExpressionOp: Error parsing right-hand side of a expression");
+      }
       int next_prec = operator_precedence[active_token.type];
       if (token_prec < next_prec) {
         rhs = parseExpressionOp(token_prec + 1, std::move(rhs));
+        if (!rhs || is_error) {
+          return propagateError("parseExpressionOp: Error parsing right-hand side of a expression");
+        }
       }
 
       lhs = make_unique<BinaryExpressionAST>(op, std::move(lhs), std::move(rhs));
@@ -391,6 +468,9 @@ namespace minic_parser {
     if (op.type == MINUS || op.type == NOT) {
       getNextToken(); // Consume OPERATOR
       PtrExpressionAST operand = parseNegation();
+      if (!operand || is_error) {
+        return propagateError("parseNegation: Error parsing expression");
+      }
       return make_unique<UnaryExpressionAST>(op, std::move(operand));
     } else if (isLiteral(op.type) ||
         op.type == IDENT ||
@@ -404,6 +484,9 @@ namespace minic_parser {
     if (active_token.type == LPAR) {
       getNextToken(); // Consume (
       PtrExpressionAST expr = parseExpression();
+      if (!expr || is_error) {
+        return propagateError("parseParens: Error parsing expression");
+      }
       if (active_token.type == RPAR) {
         getNextToken(); // Consume )
         return expr;
@@ -441,6 +524,9 @@ namespace minic_parser {
     if (active_token.type == LPAR) {
       getNextToken(); // Consume (
       vector<PtrExpressionAST> arguments = parseArguments();
+      if (is_error) {
+        return propagateError("parseIdentifier: Error parsing arguments");
+      }
       if (active_token.type != RPAR) {
         return raiseError("parseIdentifier: Expected ')'");
       }
@@ -457,12 +543,20 @@ namespace minic_parser {
 
     if (isExpression(active_token.type)) {
       PtrExpressionAST first_argument = parseExpression();
+      if (!first_argument) {
+        propagateError("parseArguments: Error parsing argument");
+        return arguments;
+      }
       arguments.push_back(std::move(first_argument));
 
       while (active_token.type == COMMA) {
         getNextToken(); // Consume COMMA
-        PtrExpressionAST argument = parseExpression();
-        arguments.push_back(std::move(argument));
+        PtrExpressionAST next_argument = parseExpression();
+          if (!next_argument) {
+            propagateError("parseArguments: Error parsing argument");
+            return arguments;
+          }
+        arguments.push_back(std::move(next_argument));
       }
     }
 
@@ -497,7 +591,13 @@ namespace minic_parser {
   }
 
   static std::nullptr_t raiseError(const char *msg) {
+    is_error = true;
     fprintf(stderr, "Error: %s [%d:%d]\n", msg, active_token.line_num, active_token.column_num);
+    return nullptr;
+  }
+
+  static std::nullptr_t propagateError(const char *msg) {
+    fprintf(stderr, "Trace: %s\n", msg);
     return nullptr;
   }
 

@@ -74,5 +74,6 @@ namespace minic_parser {
 
   static MiniCType convertType(int token_type);
   static std::nullptr_t raiseError(const char *msg);
+  static std::nullptr_t propagateError(const char *msg);
 
 }
