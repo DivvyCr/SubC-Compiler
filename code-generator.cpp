@@ -78,13 +78,11 @@ namespace minic_code_generator {
       {{MULT, INTEGER}, Instruction::BinaryOps::Mul},
       {{DIV, INTEGER}, Instruction::BinaryOps::SDiv},
       {{MOD, INTEGER}, Instruction::BinaryOps::SRem},
-      {{AND, FLOAT}, Instruction::BinaryOps::And},
-      {{OR, FLOAT}, Instruction::BinaryOps::Or},
-      {{PLUS, FLOAT}, Instruction::BinaryOps::Add},
-      {{MINUS, FLOAT}, Instruction::BinaryOps::Sub},
-      {{MULT, FLOAT}, Instruction::BinaryOps::Mul},
-      {{DIV, FLOAT}, Instruction::BinaryOps::SDiv},
-      {{MOD, FLOAT}, Instruction::BinaryOps::SRem}
+      {{PLUS, FLOAT}, Instruction::BinaryOps::FAdd},
+      {{MINUS, FLOAT}, Instruction::BinaryOps::FSub},
+      {{MULT, FLOAT}, Instruction::BinaryOps::FMul},
+      {{DIV, FLOAT}, Instruction::BinaryOps::FDiv},
+      {{MOD, FLOAT}, Instruction::BinaryOps::FRem}
     };
 
     std::map<std::pair<int, MiniCType>, CmpInst::Predicate> comparison_instructions = {
