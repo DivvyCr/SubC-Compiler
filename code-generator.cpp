@@ -197,20 +197,22 @@ namespace minic_code_generator {
         return raiseError("Unknown variable for assignment");
       }
       void* visit(FunctionCallAST &node) {
-        Function *llvm_call = getModule()->getFunction(node.getIdentifier());
-        if (!llvm_call) return raiseError("Unknown function called.");
+        Function *called_function = getModule()->getFunction(node.getIdentifier());
+        if (!called_function) return raiseError("Unknown function called");
 
-        if (node.getArguments().size() != llvm_call->arg_size()) {
-          return raiseError("Bad function call (Arguments).");
+        int num_expected_arguments = called_function->arg_size();
+        int num_supplied_arguments = node.getArguments().size();
+        if (num_supplied_arguments != num_expected_arguments) {
+          return raiseError("Invalid number of arguments in function call");
         }
 
-        vector<Value *> llvm_arguments;
-        for (int i = 0; i < node.getArguments().size(); i++) {
-          Value *arg = generateCode(*node.getArguments()[i]);
-          if (!arg) return nullptr;
-          llvm_arguments.push_back(arg);
+        vector<Value *> arguments;
+        for (PtrExpressionAST &arg_expression : node.getArguments()) {
+          Value *arg = generateCode(*arg_expression);
+          if (!arg) return raiseError("Malformed argument in function call");
+          arguments.push_back(arg);
         }
-        return getBuilder()->CreateCall(llvm_call, llvm_arguments);
+        return getBuilder()->CreateCall(called_function, arguments);
       }
       void* visit(UnaryExpressionAST &node) {
         Value *expression = generateCode(*node.getExpression());
