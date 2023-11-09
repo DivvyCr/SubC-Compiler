@@ -161,32 +161,40 @@ namespace minic_code_generator {
           ? getBuilder()->CreateLoad(global_variable->getValueType(), global_variable)
           : raiseError(("Use of undeclared variable: " + variable_name).c_str());
       }
-      void* visit(AssignmentAST &node) {
-        string assignee_ident = node.getIdentifier();
-        AllocaInst *assignee = (*LocalVariableTable)[assignee_ident];
+      Value* storeAssignment(Value *assignee, Value *assignment, Type *assignee_type) {
+        Type *assignment_type = assignment->getType();
 
-        GlobalVariable *global_variable = getModule()->getNamedGlobal(assignee_ident);
-
-        Value *expression = generateCode(*node.getAssignment());
-        if (!expression) return nullptr;
-        
-        if (assignee) {
-          // TODO: Handle int-to-float conversion.
-          if (assignee->getAllocatedType() != expression->getType()) {
-            return raiseError("Mismatched types on assignment.");
+        if (assignee_type->isFloatTy() || assignment_type->isFloatTy()) {
+          if (assignee_type->isIntegerTy(32)) {
+            assignee = getBuilder()->CreateSIToFP(assignee, getFloatType(), "convert");
           }
-          getBuilder()->CreateStore(expression, assignee);
-        } else if (global_variable) {
-          // TODO: Handle int-to-float conversion.
-          if (global_variable->getValueType() != expression->getType()) {
-            return raiseError("Mismatched types on assignment.");
+          if (assignment_type->isIntegerTy(32)) {
+            assignment = getBuilder()->CreateSIToFP(assignment, getFloatType(), "convert");
           }
-          getBuilder()->CreateStore(expression, global_variable);
-        } else {
-          return raiseError("Unknown variable for assignment.");
+          getBuilder()->CreateStore(assignment, assignee);
+          return assignment;
         }
 
-        return expression;
+        if (assignee_type != assignment->getType()) {
+          return raiseError("Mismatched types on assignment.");
+        }
+
+        // By this point, assignee and assignment must have the same (non-float) types:
+        getBuilder()->CreateStore(assignment, assignee);
+        return assignment;
+      }
+      void* visit(AssignmentAST &node) {
+        string assignee_name = node.getIdentifier();
+        AllocaInst *assignee_alloca = (*LocalVariableTable)[assignee_name];
+        GlobalVariable *global_variable = getModule()->getNamedGlobal(assignee_name);
+
+        Value *expression = generateCode(*node.getAssignment());
+        if (!expression) return raiseError("Malformed assignment expression");
+
+        // Try to assign local variable first, to shadow any global variables:
+        if (assignee_alloca) return storeAssignment(assignee_alloca, expression, assignee_alloca->getAllocatedType());
+        if (global_variable) return storeAssignment(global_variable, expression, global_variable->getValueType());
+        return raiseError("Unknown variable for assignment");
       }
       void* visit(FunctionCallAST &node) {
         Function *llvm_call = getModule()->getFunction(node.getIdentifier());
@@ -260,7 +268,11 @@ namespace minic_code_generator {
           }
         }
 
-        if (left->getType() != right->getType()) return raiseError("Mismatched expression types (for arithmetic operation)"); 
+        if (!is_float && (left->getType() != right->getType())) {
+          // NOTE: If is_float is true, both types are always converted;
+          // however, this is not represented in the LLVM Type values, hence the check.
+          return raiseError("Mismatched expression types (for arithmetic operation)"); 
+        }
 
         // Generate the appropriate operation instruction:
         // TODO: Create struct to hold is_float and op_type together, then use a map on it?
