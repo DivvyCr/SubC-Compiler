@@ -132,7 +132,7 @@ namespace minic_code_generator {
         AllocaInst *variable_alloca = (*LocalVariableTable)[variable_name];
 
         if (variable_alloca && variable_type) {
-          return errorExit(("Redeclaration of local variable: " + variable_name).c_str());
+          return errorExit(("Cannot redeclare local variable: " + variable_name).c_str());
         }
 
         if (variable_alloca && !variable_type) {
@@ -311,61 +311,68 @@ namespace minic_code_generator {
         }
       }
       void visit(IfBlockAST &node) {
-        Function *parentFunction = getBuilder()->GetInsertBlock()->getParent();
-        BasicBlock *trueBlock = BasicBlock::Create(*getContext(), "if.true", parentFunction);
-        BasicBlock *falseBlock = BasicBlock::Create(*getContext(), "if.false", parentFunction);
-        BasicBlock *afterBlock = BasicBlock::Create(*getContext(), "if.after", parentFunction);
+        Function *parent_function = getBuilder()->GetInsertBlock()->getParent();
+        BasicBlock *true_block = BasicBlock::Create(*getContext(), "if.true", parent_function);
+        BasicBlock *false_block = BasicBlock::Create(*getContext(), "if.false", parent_function);
+        BasicBlock *after_block = BasicBlock::Create(*getContext(), "if.after", parent_function);
 
         // Generate code for the condition:
         Value *condition = ExpressionGenerator.generateCode(*node.getCondition());
-        getBuilder()->CreateCondBr(condition, trueBlock, falseBlock);
+        getBuilder()->CreateCondBr(condition, true_block, false_block);
 
         // Generate code for the True branch:
-        getBuilder()->SetInsertPoint(trueBlock);
+        getBuilder()->SetInsertPoint(true_block);
         generateCode(*node.getTrueBranch());
-        getBuilder()->CreateBr(afterBlock);
+        getBuilder()->CreateBr(after_block);
 
         // Generate code for the False branch:
-        getBuilder()->SetInsertPoint(falseBlock);
+        getBuilder()->SetInsertPoint(false_block);
         generateCode(*node.getFalseBranch());
-        getBuilder()->CreateBr(afterBlock);
+        getBuilder()->CreateBr(after_block);
 
         // Place subsequent insertion to after block:
-        getBuilder()->SetInsertPoint(afterBlock);
+        getBuilder()->SetInsertPoint(after_block);
       }
       void visit(WhileBlockAST &node) {
-        Function *parentFunction = getBuilder()->GetInsertBlock()->getParent();
-        BasicBlock *condBlock = BasicBlock::Create(*getContext(), "while.cond", parentFunction);
-        BasicBlock *loopBlock = BasicBlock::Create(*getContext(), "while.body", parentFunction);
-        BasicBlock *afterBlock= BasicBlock::Create(*getContext(), "while.after", parentFunction);
+        Function *parent_function = getBuilder()->GetInsertBlock()->getParent();
+        BasicBlock *cond_block = BasicBlock::Create(*getContext(), "while.cond", parent_function);
+        BasicBlock *loop_block = BasicBlock::Create(*getContext(), "while.body", parent_function);
+        BasicBlock *after_block= BasicBlock::Create(*getContext(), "while.after", parent_function);
 
         // Unconditionally enter the condition upon first encountering the while loop:
-        getBuilder()->CreateBr(condBlock);
+        getBuilder()->CreateBr(cond_block);
  
         // Generate code for the condition:
-        getBuilder()->SetInsertPoint(condBlock);
+        getBuilder()->SetInsertPoint(cond_block);
         Value *condition = ExpressionGenerator.generateCode(*node.getCondition());
-        getBuilder()->CreateCondBr(condition, loopBlock, afterBlock);
+        getBuilder()->CreateCondBr(condition, loop_block, after_block);
 
         // Generate code for the body:
-        getBuilder()->SetInsertPoint(loopBlock);
+        getBuilder()->SetInsertPoint(loop_block);
         generateCode(*node.getBody());
-        getBuilder()->CreateBr(condBlock);
-        loopBlock = getBuilder()->GetInsertBlock();
+        getBuilder()->CreateBr(cond_block);
+        loop_block = getBuilder()->GetInsertBlock();
 
         // Place subsequent insertion to after block:
-        getBuilder()->SetInsertPoint(afterBlock);
+        getBuilder()->SetInsertPoint(after_block);
       }
       void visit(ReturnAST &node) {
-        // TODO: Check that the function returns appropriate TYPE.
-        if (node.getBody()) {
-          Value *expression = ExpressionGenerator.generateCode(*node.getBody());
-          if (!expression) return;
+        Function *parent_function = getBuilder()->GetInsertBlock()->getParent();
+        Value *return_body = (node.getBody())
+          ? ExpressionGenerator.generateCode(*node.getBody()) : nullptr;
 
-          getBuilder()->CreateRet(expression);
-          return;
+        // Type-check:
+        if ((return_body && parent_function->getReturnType() != return_body->getType()) ||
+            (!return_body && parent_function->getReturnType() != getVoidType())) {
+          errorExit("Mismatched function return type and return statement");
         }
-        getBuilder()->CreateRetVoid();
+
+        // Generate return statement:
+        if (node.getBody()) {
+          getBuilder()->CreateRet(return_body);
+        } else {
+          getBuilder()->CreateRetVoid();
+        }
       }
   };
 
@@ -385,58 +392,65 @@ namespace minic_code_generator {
       }
 
       void generatePrototype(PrototypeAST &node) {
+        // Convert parsed parameter types to LLVM Types:
         vector<Type *> parameter_types;
         for (const PtrVariableAST &var : node.getParameters()) {
-          MiniCType parameter_minictype = var->getType();
-          Type *parameter_type = convertNonVoidType(parameter_minictype);
+          Type *parameter_type = convertNonVoidType(var->getType());
           if (!parameter_type) errorExit("Malformed parameter type");
           parameter_types.push_back(parameter_type);    
         }
-
+        // Convert parsed type to LLVM Type:
         MiniCType return_minictype = node.getReturnType();
         Type *return_type = (return_minictype == VOID) ? getVoidType() : convertNonVoidType(return_minictype);
         if (!return_type) errorExit("Malformed return type");
-
-        FunctionType *function_type = FunctionType::get(return_type, parameter_types, false);
-
-        Function *function = Function::Create(function_type, Function::ExternalLinkage, node.getIdentifier(), getModule());
-        // Necessary to name arguments, in order to make it easier to use them inside function body.
-        int i = 0; 
-        for (auto &arg : function->args()) {
-          arg.setName(node.getParameters()[i++]->getIdentifier());
+        // Generate LLVM function signature:
+        FunctionType *function_signature = FunctionType::get(return_type, parameter_types, false);
+        
+        // Check whether the same function exists:
+        Function *existing_function = getModule()->getFunction(node.getIdentifier());
+        if (existing_function && existing_function->getFunctionType() == function_signature) {
+          errorExit("Cannot redeclare function"); // NOTE: Relying on lazy evaluation above
         }
 
+        // Declare LLVM Function:
+        Function *function = Function::Create(function_signature, Function::ExternalLinkage, node.getIdentifier(), getModule());
+        int i = 0; // Name the arguments in order to make it easier to use them inside function body:
+        for (auto &arg : function->args()) arg.setName(node.getParameters()[i++]->getIdentifier());
+
+        // Add PrototypeAST to known functions:
         (*Functions)[node.getIdentifier()] = &node;
-        return;
       }
 
       void generateFunction(FunctionAST &node) {
-        auto &prototype = *node.getPrototype();
-        string function_name = node.getPrototype()->getIdentifier();
-        (*Functions)[function_name] = &*node.getPrototype();
+        // Generate function signature and declare function:
+        generatePrototype(*node.getPrototype());
+        Function *function = getModule()->getFunction(node.getPrototype()->getIdentifier());
+        if (!function) errorExit("Unknown function");
 
-        Function *llvm_function = getModule()->getFunction(function_name);
-        if (!llvm_function) {
-          PrototypeAST *proto = (*Functions)[function_name];
-          if (!proto) errorExit("Function not known");
-          generatePrototype(*proto);
-          llvm_function = getModule()->getFunction(function_name);
-        }
-        if (!llvm_function) return;
+        // Generate block for function body:
+        BasicBlock *functionBodyBlock = BasicBlock::Create(*getContext(), "entry", function);
+        getBuilder()->SetInsertPoint(functionBodyBlock);
 
-        BasicBlock *llvm_block = BasicBlock::Create(*getContext(), "entry", llvm_function);
-        getBuilder()->SetInsertPoint(llvm_block);
-
+        // Reset local variables; re-initialise with function parameters:
         LocalVariableTable->clear();
-        for (auto &llvm_argument : llvm_function->args()) {
-          AllocaInst *argument_alloca = createEntryBlockAlloca(llvm_function, llvm_argument.getType(), llvm_argument.getName());
-          getBuilder()->CreateStore(&llvm_argument, argument_alloca);
-          (*LocalVariableTable)[string(llvm_argument.getName())] = argument_alloca;
+        for (auto &arg : function->args()) {
+          AllocaInst *argument_alloca = createEntryBlockAlloca(function, arg.getType(), arg.getName());
+          getBuilder()->CreateStore(&arg, argument_alloca);
+          (*LocalVariableTable)[string(arg.getName())] = argument_alloca;
         }
 
+        // Generate code for the function body:
         StatementGenerator.generateCode(*node.getBody());
-        verifyFunction(*llvm_function);
-        return; // TODO: Handle missing return statements.
+        // Ensure function has a return statement:
+        if (!getBuilder()->GetInsertBlock()->getTerminator()) {
+          if (function->getReturnType()->isVoidTy()) {
+            getBuilder()->CreateRetVoid();
+          } else {
+            errorExit("Non-void function must have a return statement");
+          }
+        }
+        // LLVM-supplied function to catch consistency bugs:
+        verifyFunction(*function);
       }
 
       void generateProgram(const ProgramAST &node) {
