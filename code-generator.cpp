@@ -5,9 +5,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-#include <functional>
-#include <iostream>
 #include <stdio.h>
 
 #include "llvm/ADT/APFloat.h"
@@ -22,15 +19,12 @@
 #include "llvm/IR/Value.h"
 #include "llvm/IR/Verifier.h"
 
-#include "abstract-syntax.h"
 #include "visitor.h"
+
+using namespace llvm;
 
 using std::string;
 using std::vector;
-using std::unique_ptr;
-
-using namespace std::placeholders;
-using namespace llvm;
 
 using SymbolTable = std::map<string, AllocaInst *>;
 using FunctionTable = std::map<string, PrototypeAST *>;
@@ -39,8 +33,8 @@ namespace minic_code_generator {
 
   class BaseCodeGenerator {
     public:
-      BaseCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable *symbols, FunctionTable *functions)
-        : TheContext(llvmContext), TheModule(llvmModule), TheBuilder(irBuilder), LocalVariableTable(symbols), Functions(functions) {}
+      BaseCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder)
+        : TheContext(llvmContext), TheModule(llvmModule), TheBuilder(irBuilder) {}
 
       LLVMContext *getContext() { return TheContext; }
       Module *getModule() { return TheModule; }
@@ -61,9 +55,6 @@ namespace minic_code_generator {
         return nullptr;
       }
     protected:
-      SymbolTable *LocalVariableTable;
-      FunctionTable *Functions;
-
       AllocaInst *createEntryBlockAlloca(Function *function, Type *variable_type, StringRef variable_name) {
         IRBuilder<> tmp_builder(&function->getEntryBlock(), function->getEntryBlock().begin());
         AllocaInst *variable_alloca = tmp_builder.CreateAlloca(variable_type, nullptr, variable_name);
@@ -76,6 +67,9 @@ namespace minic_code_generator {
   };
 
   class ExpressionCodeGenerator : public ExpressionVisitor, public BaseCodeGenerator {
+    SymbolTable *LocalVariables;
+    FunctionTable *Functions;
+
     std::map<std::pair<int, MiniCType>, Instruction::BinaryOps> arithmetic_instructions = {
       {{AND, INTEGER}, Instruction::BinaryOps::And},
       {{OR, INTEGER}, Instruction::BinaryOps::Or},
@@ -110,7 +104,7 @@ namespace minic_code_generator {
 
     public:
       ExpressionCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable *symbols, FunctionTable *functions)
-        : BaseCodeGenerator(llvmContext, llvmModule, irBuilder, symbols, functions) {}
+        : BaseCodeGenerator(llvmContext, llvmModule, irBuilder), LocalVariables(symbols), Functions(functions) {}
 
       Value* generateCode(const ExpressionAST &node) {
         return reinterpret_cast<Value *>(const_cast<ExpressionAST &>(node).dispatch(*this));
@@ -129,7 +123,7 @@ namespace minic_code_generator {
       void* visit(VariableAST &node) {
         string variable_name = node.getIdentifier();
         Type *variable_type = convertNonVoidType(node.getType());
-        AllocaInst *variable_alloca = (*LocalVariableTable)[variable_name];
+        AllocaInst *variable_alloca = (*LocalVariables)[variable_name];
 
         if (variable_alloca && variable_type) {
           return errorExit(("Cannot redeclare local variable: " + variable_name).c_str());
@@ -146,7 +140,7 @@ namespace minic_code_generator {
           // NOTE: This will shadow global variables, see above
           Function *parent_function = getBuilder()->GetInsertBlock()->getParent();
           AllocaInst *new_variable_alloca = createEntryBlockAlloca(parent_function, variable_type, variable_name);
-          (*LocalVariableTable)[node.getIdentifier()] = new_variable_alloca;
+          (*LocalVariables)[node.getIdentifier()] = new_variable_alloca;
           return new_variable_alloca;
         }
 
@@ -159,7 +153,7 @@ namespace minic_code_generator {
       }
       void* visit(AssignmentAST &node) {
         string assignee_name = node.getIdentifier();
-        AllocaInst *assignee_alloca = (*LocalVariableTable)[assignee_name];
+        AllocaInst *assignee_alloca = (*LocalVariables)[assignee_name];
         GlobalVariable *global_variable = getModule()->getNamedGlobal(assignee_name);
 
         Value *expression = generateCode(*node.getAssignment());
@@ -289,10 +283,12 @@ namespace minic_code_generator {
 
   class StatementCodeGenerator : public StatementVisitor, public BaseCodeGenerator {
     ExpressionCodeGenerator ExpressionGenerator;
+    SymbolTable *LocalVariables;
+    FunctionTable *Functions;
 
     public:
       StatementCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable *symbols, FunctionTable *functions)
-        : BaseCodeGenerator(llvmContext, llvmModule, irBuilder, symbols, functions),
+        : BaseCodeGenerator(llvmContext, llvmModule, irBuilder), LocalVariables(symbols), Functions(functions),
         ExpressionGenerator(llvmContext, llvmModule, irBuilder, symbols, functions) {}
 
       void generateCode(const StatementAST &node) {
@@ -377,12 +373,13 @@ namespace minic_code_generator {
   };
 
   class ProgramCodeGenerator : public BaseCodeGenerator {
-    StatementCodeGenerator StatementGenerator;
+    FunctionTable *Functions;
+    IRBuilder<> MiniCBuilder;
 
     public:
-      ProgramCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable *symbols, FunctionTable *functions)
-        : BaseCodeGenerator(llvmContext, llvmModule, irBuilder, symbols, functions),
-        StatementGenerator(llvmContext, llvmModule, irBuilder, symbols, functions) {}
+      ProgramCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, FunctionTable *functions)
+        : BaseCodeGenerator(llvmContext, llvmModule, &MiniCBuilder),
+        Functions(functions), MiniCBuilder(*llvmContext) {}
 
       void generateGlobal(GlobalVariableAST &node) {
         Type *variable_type = convertNonVoidType(node.getVariable()->getType());
@@ -431,16 +428,16 @@ namespace minic_code_generator {
         BasicBlock *functionBodyBlock = BasicBlock::Create(*getContext(), "entry", function);
         getBuilder()->SetInsertPoint(functionBodyBlock);
 
-        // Reset local variables; re-initialise with function parameters:
-        LocalVariableTable->clear();
+        // Initialise local variables with function parameters:
+        SymbolTable LocalVariables;
         for (auto &arg : function->args()) {
           AllocaInst *argument_alloca = createEntryBlockAlloca(function, arg.getType(), arg.getName());
           getBuilder()->CreateStore(&arg, argument_alloca);
-          (*LocalVariableTable)[string(arg.getName())] = argument_alloca;
+          LocalVariables[string(arg.getName())] = argument_alloca;
         }
 
         // Generate code for the function body:
-        StatementGenerator.generateCode(*node.getBody());
+        StatementCodeGenerator(getContext(), getModule(), getBuilder(), &LocalVariables, Functions).generateCode(*node.getBody());
         // Ensure function has a return statement:
         if (!getBuilder()->GetInsertBlock()->getTerminator()) {
           if (function->getReturnType()->isVoidTy()) {
@@ -463,13 +460,10 @@ namespace minic_code_generator {
 
   void generate(const ProgramAST &node) {
     LLVMContext MiniCContext;
-    unique_ptr<Module> MiniCModule = std::make_unique<Module>("MiniC", *&MiniCContext);
-    IRBuilder<> MiniCBuilder(MiniCContext);
+    std::unique_ptr<Module> MiniCModule = std::make_unique<Module>("MiniC", *&MiniCContext);
 
-    SymbolTable ss;
     FunctionTable fs;
-    
-    ProgramCodeGenerator(&MiniCContext, MiniCModule.get(), &MiniCBuilder, &ss, &fs).generateProgram(node);
+    ProgramCodeGenerator(&MiniCContext, MiniCModule.get(), &fs).generateProgram(node);
   }
 
   std::nullptr_t errorExit(const char* msg) {
