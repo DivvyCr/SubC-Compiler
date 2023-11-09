@@ -132,7 +132,7 @@ namespace minic_code_generator {
         AllocaInst *variable_alloca = (*LocalVariableTable)[variable_name];
 
         if (variable_alloca && variable_type) {
-          return raiseError(("Redeclaration of local variable: " + variable_name).c_str());
+          return errorExit(("Redeclaration of local variable: " + variable_name).c_str());
         }
 
         if (variable_alloca && !variable_type) {
@@ -155,7 +155,7 @@ namespace minic_code_generator {
         GlobalVariable *global_variable = getModule()->getNamedGlobal(variable_name);
         return (global_variable) 
           ? getBuilder()->CreateLoad(global_variable->getValueType(), global_variable)
-          : raiseError(("Use of undeclared variable: " + variable_name).c_str());
+          : errorExit(("Cannot reference undeclared variable: " + variable_name).c_str());
       }
       void* visit(AssignmentAST &node) {
         string assignee_name = node.getIdentifier();
@@ -163,35 +163,33 @@ namespace minic_code_generator {
         GlobalVariable *global_variable = getModule()->getNamedGlobal(assignee_name);
 
         Value *expression = generateCode(*node.getAssignment());
-        if (!expression) return raiseError("Malformed assignment expression");
+        if (!expression) return errorExit("Malformed assignment expression");
 
         // Try to assign local variable first, to shadow any global variables:
         if (assignee_alloca) return storeAssignment(assignee_alloca, expression, assignee_alloca->getAllocatedType());
         if (global_variable) return storeAssignment(global_variable, expression, global_variable->getValueType());
-        return raiseError("Unknown variable for assignment");
+        return errorExit("Unknown variable for assignment");
       }
       void* visit(FunctionCallAST &node) {
         Function *called_function = getModule()->getFunction(node.getIdentifier());
-        if (!called_function) return raiseError("Unknown function called");
+        if (!called_function) return errorExit("Unknown function called");
 
         int num_expected_arguments = called_function->arg_size();
         int num_supplied_arguments = node.getArguments().size();
         if (num_supplied_arguments != num_expected_arguments) {
-          return raiseError("Invalid number of arguments in function call");
+          return errorExit("Invalid number of arguments in function call");
         }
 
         vector<Value *> arguments;
         for (PtrExpressionAST &arg_expression : node.getArguments()) {
           Value *arg = generateCode(*arg_expression);
-          if (!arg) return raiseError("Malformed argument in function call");
+          if (!arg) return errorExit("Malformed argument in function call");
           arguments.push_back(arg);
         }
         return getBuilder()->CreateCall(called_function, arguments);
       }
       void* visit(UnaryExpressionAST &node) {
         Value *expression = generateCode(*node.getExpression());
-        if (!expression) return raiseError("Malformed expression (for unary operand)");
-
         Type *expression_type = expression->getType();
         switch (node.getOperator().type) {
           case MINUS:
@@ -201,25 +199,22 @@ namespace minic_code_generator {
             if (expression_type->isIntegerTy(32)) {
               return getBuilder()->CreateNeg(expression); // Subtracts from 0, potential overflow
             }
-            return raiseError("Cannot negate non-arithmetic expression");
+            return errorExit("Cannot negate non-arithmetic expression");
           case NOT:
             if (expression_type->isIntegerTy(1)) {
               return getBuilder()->CreateNot(expression); // Applies (1 XOR expression)
             }
-            return raiseError("Cannot apply NOT to non-boolean expression");
+            return errorExit("Cannot apply NOT to non-boolean expression");
           default:
             break;
         }
-        return raiseError("Unknown or inappropriate unary operator");
+        return errorExit("Unknown or inappropriate unary operator");
       }
       void* visit(BinaryExpressionAST &node) {
         // Initialise LHS and RHS:
         Value *left = generateCode(*node.getLeft());
-        if (!left) return raiseError("Malformed expression (for binary operand)");
         Type *left_type = left->getType();
-
         Value *right = generateCode(*node.getRight());
-        if (!right) return raiseError("Malformed expression (for binary operand)");
         Type *right_type = right->getType();
 
         // Type-check:
@@ -233,7 +228,7 @@ namespace minic_code_generator {
           operands_type = BOOL;
         }
         if (left->getType() != right->getType()) {
-          return raiseError("Mismatched expression types (for arithmetic operation)"); 
+          return errorExit("Mismatched expression types (for arithmetic operation)"); 
         }
 
         // Generate appropriate instruction:
@@ -248,13 +243,14 @@ namespace minic_code_generator {
           return getBuilder()->CreateCmp(comparison_instructions[{operator_type, operands_type}], left, right);
         }
 
-        return raiseError("Unknown or inappropriate binary operator");
+        return errorExit("Unknown or inappropriate binary operator");
       }
 
       Value* storeAssignment(Value *assignee, Value *assignment, Type *assignee_type) {
         Type *assignment_type = assignment->getType();
         if (assignee_type->isIntegerTy(32) && assignment_type->isFloatTy()) {
-          return raiseError("Cannot assign float value to integer variable, due to loss of precision");
+          errorExit("Cannot assign float value to integer variable, due to loss of precision");
+          exit(1);
         }
         if (assignee_type->isFloatTy() && assignment_type->isIntegerTy(32)) {
           convertToFloatIfInt(&assignment, assignment_type);
@@ -265,7 +261,7 @@ namespace minic_code_generator {
           return assignment;
         }
 
-        return raiseError("Mismatched types on assignment");
+        return errorExit("Mismatched types on assignment");
       }
 
       void convertToFloatIfInt(Value **value, Type *value_type) {
@@ -307,12 +303,12 @@ namespace minic_code_generator {
         ExpressionGenerator.generateCode(*node.getExpression());
       }
       void visit(CodeBlockAST &node) {
-        for (int i = 0; i < node.getDeclarations().size(); i++) { // Always VariableAST
-          Value *status = ExpressionGenerator.generateCode(*node.getDeclarations()[i]);
-          // if (!status) return raiseError("Malformed declaration.");
+        for (PtrVariableAST &var : node.getDeclarations()) {
+          ExpressionGenerator.generateCode(*var);
         }
-
-        for (int i = 0; i < node.getStatements().size(); i++) generateCode(*node.getStatements()[i]);
+        for (PtrStatementAST &stmt : node.getStatements()) {
+          generateCode(*stmt);
+        }
       }
       void visit(IfBlockAST &node) {
         Function *parentFunction = getBuilder()->GetInsertBlock()->getParent();
@@ -322,19 +318,16 @@ namespace minic_code_generator {
 
         // Generate code for the condition:
         Value *condition = ExpressionGenerator.generateCode(*node.getCondition());
-        if (!condition) return;
         getBuilder()->CreateCondBr(condition, trueBlock, falseBlock);
 
         // Generate code for the True branch:
         getBuilder()->SetInsertPoint(trueBlock);
-        /*Value *trueExpression = */generateCode(*node.getTrueBranch());
-        // if (!trueExpression) return raiseError("Malformed true branch.");
+        generateCode(*node.getTrueBranch());
         getBuilder()->CreateBr(afterBlock);
 
         // Generate code for the False branch:
         getBuilder()->SetInsertPoint(falseBlock);
-        /*Value *falseExpression = */generateCode(*node.getFalseBranch());
-        // if (!falseExpression) return raiseError("Malformed false branch.");
+        generateCode(*node.getFalseBranch());
         getBuilder()->CreateBr(afterBlock);
 
         // Place subsequent insertion to after block:
@@ -352,13 +345,11 @@ namespace minic_code_generator {
         // Generate code for the condition:
         getBuilder()->SetInsertPoint(condBlock);
         Value *condition = ExpressionGenerator.generateCode(*node.getCondition());
-        if (!condition) return;
         getBuilder()->CreateCondBr(condition, loopBlock, afterBlock);
 
         // Generate code for the body:
         getBuilder()->SetInsertPoint(loopBlock);
-        /*Value *bodyValue = */generateCode(*node.getBody());
-        //if (!bodyValue) return raiseError("Malformed while body.");
+        generateCode(*node.getBody());
         getBuilder()->CreateBr(condBlock);
         loopBlock = getBuilder()->GetInsertBlock();
 
@@ -388,29 +379,23 @@ namespace minic_code_generator {
 
       void generateGlobal(GlobalVariableAST &node) {
         Type *variable_type = convertNonVoidType(node.getVariable()->getType());
-        if (!variable_type) return;
+        if (!variable_type) errorExit("Malformed global variable type");
 
         getModule()->getOrInsertGlobal(node.getVariable()->getIdentifier(), variable_type);
       }
 
       void generatePrototype(PrototypeAST &node) {
         vector<Type *> parameter_types;
-        for (int i = 0; i < node.getParameters().size(); i++) {
-          MiniCType parameter_minictype = node.getParameters()[i]->getType();
+        for (const PtrVariableAST &var : node.getParameters()) {
+          MiniCType parameter_minictype = var->getType();
           Type *parameter_type = convertNonVoidType(parameter_minictype);
-          if (!parameter_type) { // Shouldn't be able to enter here, due to parser
-            raiseError("Malformed parameter type");
-            return;
-          }
+          if (!parameter_type) errorExit("Malformed parameter type");
           parameter_types.push_back(parameter_type);    
         }
 
         MiniCType return_minictype = node.getReturnType();
         Type *return_type = (return_minictype == VOID) ? getVoidType() : convertNonVoidType(return_minictype);
-        if (!return_type) { // Shouldn't be able to enter here, due to parser
-          raiseError("Malformed return type");
-          return;
-        }
+        if (!return_type) errorExit("Malformed return type");
 
         FunctionType *function_type = FunctionType::get(return_type, parameter_types, false);
 
@@ -433,10 +418,7 @@ namespace minic_code_generator {
         Function *llvm_function = getModule()->getFunction(function_name);
         if (!llvm_function) {
           PrototypeAST *proto = (*Functions)[function_name];
-          if (!proto) {
-            raiseError("Function not known");
-            return;
-          }
+          if (!proto) errorExit("Function not known");
           generatePrototype(*proto);
           llvm_function = getModule()->getFunction(function_name);
         }
@@ -476,8 +458,9 @@ namespace minic_code_generator {
     ProgramCodeGenerator(&MiniCContext, MiniCModule.get(), &MiniCBuilder, &ss, &fs).generateProgram(node);
   }
 
-  std::nullptr_t raiseError(const char* msg) {
+  std::nullptr_t errorExit(const char* msg) {
     fprintf(stderr, "Error: %s\n", msg);
+    exit(1);
     return nullptr;
   }
 

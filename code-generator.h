@@ -14,7 +14,7 @@ namespace minic_code_generator {
   void generate(const ProgramAST &node);
 
   AllocaInst *createEntryBlockAlloca(Function *function, Type *variable_type, StringRef variable_name);
-  std::nullptr_t raiseError(const char* msg);
+  std::nullptr_t errorExit(const char* msg);
 }
 
 #endif // _CODEGEN_H
