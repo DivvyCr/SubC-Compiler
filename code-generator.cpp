@@ -36,10 +36,6 @@ using FunctionTable = std::map<string, PrototypeAST *>;
 
 namespace minic_code_generator {
 
-  // typedef std::function<Value* (Value *, Value *, const Twine &)> IOpFunc;
-  typedef Value* (IRBuilder<>::*IOpFunc)(Value *, Value *, const Twine &);
-  typedef Value* (IRBuilder<>::*FOpFunc)(Value *, Value *, const Twine &, MDNode *);
-
   class BaseCodeGenerator {
     public:
       BaseCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable symbols, FunctionTable functions)
@@ -57,43 +53,54 @@ namespace minic_code_generator {
   };
 
   class ExpressionCodeGenerator : public ExpressionVisitor, public BaseCodeGenerator {
-    std::map<int, IOpFunc> iOps;
-    std::map<int, FOpFunc> fOps;
+    std::map<int, Instruction::BinaryOps> iOps;
+    std::map<int, CmpInst::Predicate> iCmpOps;
+    std::map<int, Instruction::BinaryOps> fOps;
+    std::map<int, CmpInst::Predicate> fCmpOps;
 
     public:
       ExpressionCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable symbols, FunctionTable functions)
         : BaseCodeGenerator(llvmContext, llvmModule, irBuilder, symbols, functions) {
-        iOps[PLUS] = &IRBuilder<>::CreateNSWAdd;
-        iOps[MINUS] = &IRBuilder<>::CreateNSWSub;
-        iOps[MULT] = &IRBuilder<>::CreateNSWMul;
-        // iOps[DIV] = &IRBuilder<>::CreateSDiv; // Signed Division
-        iOps[MOD] = &IRBuilder<>::CreateSRem; // Signed Remainder
-        // iOps[NOT] = ONLY FLOAT NEGATION EXISTS?
-        iOps[EQ] = &IRBuilder<>::CreateICmpEQ;
-        iOps[NE] = &IRBuilder<>::CreateICmpNE;
-        iOps[GT] = &IRBuilder<>::CreateICmpSGT;
-        iOps[GE] = &IRBuilder<>::CreateICmpSGE;
-        iOps[LT] = &IRBuilder<>::CreateICmpSLT;
-        iOps[LE] = &IRBuilder<>::CreateICmpSLE;
+        // LOGIC:
+        iOps[AND] = Instruction::BinaryOps::And;
+        iOps[OR] = Instruction::BinaryOps::Or;
 
-        fOps[PLUS] = &IRBuilder<>::CreateFAdd;
-        fOps[MINUS] = &IRBuilder<>::CreateFSub;
-        fOps[MULT] = &IRBuilder<>::CreateFMul;
-        fOps[DIV] = &IRBuilder<>::CreateFDiv;
-        fOps[MOD] = &IRBuilder<>::CreateFRem;
+        // INTEGER:
+        iOps[PLUS] = Instruction::BinaryOps::Add;
+        iOps[MINUS] = Instruction::BinaryOps::Sub;
+        iOps[MULT] = Instruction::BinaryOps::Mul;
+        iOps[DIV] = Instruction::BinaryOps::SDiv;
+        iOps[MOD] = Instruction::BinaryOps::SRem;
+        // iOps[NOT] = ONLY FLOAT NEGATION EXISTS?
+        iCmpOps[EQ] = CmpInst::Predicate::ICMP_EQ;
+        iCmpOps[NE] = CmpInst::Predicate::ICMP_NE;
+        iCmpOps[GT] = CmpInst::Predicate::ICMP_SGT;
+        iCmpOps[GE] = CmpInst::Predicate::ICMP_SGE;
+        iCmpOps[GE] = CmpInst::Predicate::ICMP_SGE;
+        iCmpOps[LT] = CmpInst::Predicate::ICMP_SLT;
+        iCmpOps[LE] = CmpInst::Predicate::ICMP_SLE;
+
+        // FLOAT:
+        fOps[PLUS] = Instruction::BinaryOps::FAdd;
+        fOps[MINUS] = Instruction::BinaryOps::FSub;
+        fOps[MULT] = Instruction::BinaryOps::FMul;
+        fOps[DIV] = Instruction::BinaryOps::FDiv;
+        fOps[MOD] = Instruction::BinaryOps::FRem;
         // fOps[NOT] = &IRBuilder<>::CreateFNeg;
-        fOps[EQ] = &IRBuilder<>::CreateFCmpOEQ;
-        fOps[NE] = &IRBuilder<>::CreateFCmpONE;
-        fOps[GT] = &IRBuilder<>::CreateFCmpOGT;
-        fOps[GE] = &IRBuilder<>::CreateFCmpOGE;
-        fOps[LT] = &IRBuilder<>::CreateFCmpOLT;
-        fOps[LE] = &IRBuilder<>::CreateFCmpOLE;
+        fCmpOps[EQ] = CmpInst::Predicate::FCMP_OEQ;
+        fCmpOps[NE] = CmpInst::Predicate::FCMP_ONE;
+        fCmpOps[GT] = CmpInst::Predicate::FCMP_OGT;
+        fCmpOps[GE] = CmpInst::Predicate::FCMP_OGE;
+        fCmpOps[GE] = CmpInst::Predicate::FCMP_OGE;
+        fCmpOps[LT] = CmpInst::Predicate::FCMP_OLT;
+        fCmpOps[LE] = CmpInst::Predicate::FCMP_OLE;
       }
 
       Value* generateCode(const ExpressionAST &node) {
         return reinterpret_cast<Value *>(const_cast<ExpressionAST &>(node).dispatch(*this));
       }
 
+    private:
       void* visit(IntAST &node) {
         return ConstantInt::get(*getContext(), APInt(32, node.getValue(), true));
       }
@@ -190,17 +197,25 @@ namespace minic_code_generator {
         return raiseError("Bad expression (Unary).");
       }
       void* visit(BinaryExpressionAST &node) {
-        // Generate code for LHS and RHS:
         Value *left = generateCode(*node.getLeft());
         if (!left) return nullptr;
+        Type *left_type = left->getType();
+
         Value *right = generateCode(*node.getRight());
         if (!right) return nullptr;
+        Type *right_type = right->getType();
+
+        int op_type = node.getOperator().type;
+        if (isLogicOp(op_type)) {
+          if (left_type->isIntegerTy(1) && right_type->isIntegerTy(1)) {
+            return getBuilder()->CreateBinOp(iOps[op_type], left, right);
+          }
+          return raiseError("Mismatched expression types (for logic operation)");
+        }
 
         // Determine whether it is an INTEGER or a FLOATING-POINT operation,
         // and convert integers to floating-point if necessary:
         bool is_float = false;
-        Type *left_type = left->getType();
-        Type *right_type = right->getType();
 
         if (left_type->isFloatTy() || right_type->isFloatTy()) {
           is_float = true;
@@ -213,12 +228,32 @@ namespace minic_code_generator {
           }
         }
 
-        if (left->getType() != right->getType()) return raiseError("Mismatched expression types.");
+        if (left->getType() != right->getType()) return raiseError("Mismatched expression types (for arithmetic operation)"); 
 
         // Generate the appropriate operation instruction:
-        return is_float
-          ? (*getBuilder().*(fOps[node.getOperator().type]))(left, right, "", nullptr)
-          : (*getBuilder().*(iOps[node.getOperator().type]))(left, right, "");
+        // TODO: Create struct to hold is_float and op_type together, then use a map on it?
+        if (is_float) {
+          if (isMathOp(op_type)) return getBuilder()->CreateBinOp(fOps[op_type], left, right);
+          if (isCmpOp(op_type)) return getBuilder()->CreateCmp(fCmpOps[op_type], left, right);
+        } else {
+          if (isMathOp(op_type)) return getBuilder()->CreateBinOp(iOps[op_type], left, right);
+          if (isCmpOp(op_type)) return getBuilder()->CreateCmp(iCmpOps[op_type], left, right);
+        }
+        return raiseError("Unknown operator");
+      }
+
+      bool isMathOp(int operator_type) {
+        return (operator_type == PLUS || operator_type == MINUS ||
+            operator_type == MULT || operator_type == DIV ||
+            operator_type == MOD);
+      }
+      bool isCmpOp(int operator_type) {
+        return (operator_type == EQ || operator_type == NE ||
+            operator_type == LE || operator_type == LT ||
+            operator_type == GE || operator_type == GT);
+      }
+      bool isLogicOp(int operator_type) {
+        return (operator_type == AND || operator_type == OR || operator_type == NOT);
       }
   };
 
@@ -297,6 +332,7 @@ namespace minic_code_generator {
         getBuilder()->SetInsertPoint(afterBlock);
       }
       void visit(ReturnAST &node) {
+        // TODO: Check that the function returns appropriate TYPE.
         Value *expression = ExpressionGenerator.generateCode(*node.getBody());
         if (!expression) return;
         getBuilder()->CreateRet(expression);
