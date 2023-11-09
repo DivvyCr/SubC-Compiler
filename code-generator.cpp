@@ -3,6 +3,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <functional>
@@ -75,46 +76,41 @@ namespace minic_code_generator {
   };
 
   class ExpressionCodeGenerator : public ExpressionVisitor, public BaseCodeGenerator {
-    std::map<int, Instruction::BinaryOps> iOps;
-    std::map<int, CmpInst::Predicate> iCmpOps;
-    std::map<int, Instruction::BinaryOps> fOps;
-    std::map<int, CmpInst::Predicate> fCmpOps;
+    std::map<std::pair<int, MiniCType>, Instruction::BinaryOps> arithmetic_instructions = {
+      {{AND, INTEGER}, Instruction::BinaryOps::And},
+      {{OR, INTEGER}, Instruction::BinaryOps::Or},
+      {{PLUS, INTEGER}, Instruction::BinaryOps::Add},
+      {{MINUS, INTEGER}, Instruction::BinaryOps::Sub},
+      {{MULT, INTEGER}, Instruction::BinaryOps::Mul},
+      {{DIV, INTEGER}, Instruction::BinaryOps::SDiv},
+      {{MOD, INTEGER}, Instruction::BinaryOps::SRem},
+      {{AND, FLOAT}, Instruction::BinaryOps::And},
+      {{OR, FLOAT}, Instruction::BinaryOps::Or},
+      {{PLUS, FLOAT}, Instruction::BinaryOps::Add},
+      {{MINUS, FLOAT}, Instruction::BinaryOps::Sub},
+      {{MULT, FLOAT}, Instruction::BinaryOps::Mul},
+      {{DIV, FLOAT}, Instruction::BinaryOps::SDiv},
+      {{MOD, FLOAT}, Instruction::BinaryOps::SRem}
+    };
+
+    std::map<std::pair<int, MiniCType>, CmpInst::Predicate> comparison_instructions = {
+      {{EQ, INTEGER}, CmpInst::Predicate::ICMP_EQ},
+      {{NE, INTEGER}, CmpInst::Predicate::ICMP_NE},
+      {{GT, INTEGER}, CmpInst::Predicate::ICMP_SGT},
+      {{GE, INTEGER}, CmpInst::Predicate::ICMP_SGE},
+      {{LT, INTEGER}, CmpInst::Predicate::ICMP_SLT},
+      {{LE, INTEGER}, CmpInst::Predicate::ICMP_SLE},
+      {{EQ, FLOAT}, CmpInst::Predicate::FCMP_OEQ},
+      {{NE, FLOAT}, CmpInst::Predicate::FCMP_ONE},
+      {{GT, FLOAT}, CmpInst::Predicate::FCMP_OGT},
+      {{GE, FLOAT}, CmpInst::Predicate::FCMP_OGE},
+      {{LT, FLOAT}, CmpInst::Predicate::FCMP_OLT},
+      {{LE, FLOAT}, CmpInst::Predicate::FCMP_OLE}
+    };
 
     public:
       ExpressionCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable *symbols, FunctionTable *functions)
-        : BaseCodeGenerator(llvmContext, llvmModule, irBuilder, symbols, functions) {
-        // LOGIC:
-        iOps[AND] = Instruction::BinaryOps::And;
-        iOps[OR] = Instruction::BinaryOps::Or;
-
-        // INTEGER:
-        iOps[PLUS] = Instruction::BinaryOps::Add;
-        iOps[MINUS] = Instruction::BinaryOps::Sub;
-        iOps[MULT] = Instruction::BinaryOps::Mul;
-        iOps[DIV] = Instruction::BinaryOps::SDiv;
-        iOps[MOD] = Instruction::BinaryOps::SRem;
-        iCmpOps[EQ] = CmpInst::Predicate::ICMP_EQ;
-        iCmpOps[NE] = CmpInst::Predicate::ICMP_NE;
-        iCmpOps[GT] = CmpInst::Predicate::ICMP_SGT;
-        iCmpOps[GE] = CmpInst::Predicate::ICMP_SGE;
-        iCmpOps[GE] = CmpInst::Predicate::ICMP_SGE;
-        iCmpOps[LT] = CmpInst::Predicate::ICMP_SLT;
-        iCmpOps[LE] = CmpInst::Predicate::ICMP_SLE;
-
-        // FLOAT:
-        fOps[PLUS] = Instruction::BinaryOps::FAdd;
-        fOps[MINUS] = Instruction::BinaryOps::FSub;
-        fOps[MULT] = Instruction::BinaryOps::FMul;
-        fOps[DIV] = Instruction::BinaryOps::FDiv;
-        fOps[MOD] = Instruction::BinaryOps::FRem;
-        fCmpOps[EQ] = CmpInst::Predicate::FCMP_OEQ;
-        fCmpOps[NE] = CmpInst::Predicate::FCMP_ONE;
-        fCmpOps[GT] = CmpInst::Predicate::FCMP_OGT;
-        fCmpOps[GE] = CmpInst::Predicate::FCMP_OGE;
-        fCmpOps[GE] = CmpInst::Predicate::FCMP_OGE;
-        fCmpOps[LT] = CmpInst::Predicate::FCMP_OLT;
-        fCmpOps[LE] = CmpInst::Predicate::FCMP_OLE;
-      }
+        : BaseCodeGenerator(llvmContext, llvmModule, irBuilder, symbols, functions) {}
 
       Value* generateCode(const ExpressionAST &node) {
         return reinterpret_cast<Value *>(const_cast<ExpressionAST &>(node).dispatch(*this));
@@ -161,28 +157,6 @@ namespace minic_code_generator {
           ? getBuilder()->CreateLoad(global_variable->getValueType(), global_variable)
           : raiseError(("Use of undeclared variable: " + variable_name).c_str());
       }
-      Value* storeAssignment(Value *assignee, Value *assignment, Type *assignee_type) {
-        Type *assignment_type = assignment->getType();
-
-        if (assignee_type->isFloatTy() || assignment_type->isFloatTy()) {
-          if (assignee_type->isIntegerTy(32)) {
-            assignee = getBuilder()->CreateSIToFP(assignee, getFloatType(), "convert");
-          }
-          if (assignment_type->isIntegerTy(32)) {
-            assignment = getBuilder()->CreateSIToFP(assignment, getFloatType(), "convert");
-          }
-          getBuilder()->CreateStore(assignment, assignee);
-          return assignment;
-        }
-
-        if (assignee_type != assignment->getType()) {
-          return raiseError("Mismatched types on assignment.");
-        }
-
-        // By this point, assignee and assignment must have the same (non-float) types:
-        getBuilder()->CreateStore(assignment, assignee);
-        return assignment;
-      }
       void* visit(AssignmentAST &node) {
         string assignee_name = node.getIdentifier();
         AllocaInst *assignee_alloca = (*LocalVariableTable)[assignee_name];
@@ -216,90 +190,104 @@ namespace minic_code_generator {
       }
       void* visit(UnaryExpressionAST &node) {
         Value *expression = generateCode(*node.getExpression());
-        if (!expression) return nullptr;
-        Type *expression_type = expression->getType();
+        if (!expression) return raiseError("Malformed expression (for unary operand)");
 
+        Type *expression_type = expression->getType();
         switch (node.getOperator().type) {
           case MINUS:
             if (expression_type->isFloatTy()) {
               return getBuilder()->CreateFNeg(expression); // Flips sign bit
-            } else if (expression_type->isIntegerTy(32)) {
+            }
+            if (expression_type->isIntegerTy(32)) {
               return getBuilder()->CreateNeg(expression); // Subtracts from 0, potential overflow
-            } else {
-              return raiseError("Cannot NEGATE non-arithmetic expression");
             }
+            return raiseError("Cannot negate non-arithmetic expression");
           case NOT:
-            if (!expression_type->isIntegerTy(1)) {
-              return raiseError("Cannot apply NOT to non-boolean expression");
+            if (expression_type->isIntegerTy(1)) {
+              return getBuilder()->CreateNot(expression); // Applies (1 XOR expression)
             }
-            return getBuilder()->CreateNot(expression); // Applies (1 XOR expression)
+            return raiseError("Cannot apply NOT to non-boolean expression");
           default:
             break;
         }
-        return raiseError("Bad expression (Unary).");
+        return raiseError("Unknown or inappropriate unary operator");
       }
       void* visit(BinaryExpressionAST &node) {
+        // Initialise LHS and RHS:
         Value *left = generateCode(*node.getLeft());
-        if (!left) return nullptr;
+        if (!left) return raiseError("Malformed expression (for binary operand)");
         Type *left_type = left->getType();
 
         Value *right = generateCode(*node.getRight());
-        if (!right) return nullptr;
+        if (!right) return raiseError("Malformed expression (for binary operand)");
         Type *right_type = right->getType();
 
-        int op_type = node.getOperator().type;
-        if (isLogicOp(op_type)) {
-          if (left_type->isIntegerTy(1) && right_type->isIntegerTy(1)) {
-            return getBuilder()->CreateBinOp(iOps[op_type], left, right);
-          }
-          return raiseError("Mismatched expression types (for logic operation)");
-        }
-
-        // Determine whether it is an INTEGER or a FLOATING-POINT operation,
-        // and convert integers to floating-point if necessary:
-        bool is_float = false;
-
+        // Type-check:
+        int operator_type = node.getOperator().type;
+        MiniCType operands_type = INTEGER;
         if (left_type->isFloatTy() || right_type->isFloatTy()) {
-          is_float = true;
-
-          if (left_type->isIntegerTy(32)) {
-            left = getBuilder()->CreateSIToFP(left, getFloatType(), "convert");
-          }
-          if (right_type->isIntegerTy(32)) {
-            right = getBuilder()->CreateSIToFP(right, getFloatType(), "convert");
-          }
+          convertToFloatIfInt(&left, left_type);
+          convertToFloatIfInt(&right, right_type);
+          operands_type = FLOAT;
+        } else if (left_type->isIntegerTy(1) && right_type->isIntegerTy(1)) {
+          operands_type = BOOL;
         }
-
-        if (!is_float && (left->getType() != right->getType())) {
-          // NOTE: If is_float is true, both types are always converted;
-          // however, this is not represented in the LLVM Type values, hence the check.
+        if (left->getType() != right->getType()) {
           return raiseError("Mismatched expression types (for arithmetic operation)"); 
         }
 
-        // Generate the appropriate operation instruction:
-        // TODO: Create struct to hold is_float and op_type together, then use a map on it?
-        if (is_float) {
-          if (isMathOp(op_type)) return getBuilder()->CreateBinOp(fOps[op_type], left, right);
-          if (isCmpOp(op_type)) return getBuilder()->CreateCmp(fCmpOps[op_type], left, right);
-        } else {
-          if (isMathOp(op_type)) return getBuilder()->CreateBinOp(iOps[op_type], left, right);
-          if (isCmpOp(op_type)) return getBuilder()->CreateCmp(iCmpOps[op_type], left, right);
+        // Generate appropriate instruction:
+        if ((isArithmeticOp(operator_type) && (operands_type == INTEGER || operands_type == FLOAT)) ||
+            (isLogicOp(operator_type) && operands_type == BOOL)) {
+          if (operands_type == BOOL) operands_type = INTEGER; // Necessary to match with instructions map
+          return getBuilder()->CreateBinOp(arithmetic_instructions[{operator_type, operands_type}], left, right);
         }
-        return raiseError("Unknown operator");
+        if ((isComparisonOp(operator_type) && (operands_type == INTEGER || operands_type == FLOAT)) ||
+            (operator_type == EQ && operator_type == NE && operands_type == BOOL)) {
+          if (operands_type == BOOL) operands_type = INTEGER; // Necessary to match with instructions map
+          return getBuilder()->CreateCmp(comparison_instructions[{operator_type, operands_type}], left, right);
+        }
+
+        return raiseError("Unknown or inappropriate binary operator");
       }
 
-      bool isMathOp(int operator_type) {
+      Value* storeAssignment(Value *assignee, Value *assignment, Type *assignee_type) {
+        Type *assignment_type = assignment->getType();
+        if (assignee_type->isIntegerTy(32) && assignment_type->isFloatTy()) {
+          return raiseError("Cannot assign float value to integer variable, due to loss of precision");
+        }
+        if (assignee_type->isFloatTy() && assignment_type->isIntegerTy(32)) {
+          convertToFloatIfInt(&assignment, assignment_type);
+        }
+        // NOTE: Important to explicitly check assignment type again (possible type mutation)
+        if (assignee_type == assignment->getType()) {
+          getBuilder()->CreateStore(assignment, assignee);
+          return assignment;
+        }
+
+        return raiseError("Mismatched types on assignment");
+      }
+
+      void convertToFloatIfInt(Value **value, Type *value_type) {
+        if (value_type->isIntegerTy(32)) {
+          *value = getBuilder()->CreateSIToFP(*value, getFloatType(), "conv");
+          (*value)->mutateType(getFloatType());
+        }
+      }
+
+      bool isArithmeticOp(int operator_type) {
         return (operator_type == PLUS || operator_type == MINUS ||
             operator_type == MULT || operator_type == DIV ||
             operator_type == MOD);
       }
-      bool isCmpOp(int operator_type) {
+      bool isComparisonOp(int operator_type) {
         return (operator_type == EQ || operator_type == NE ||
             operator_type == LE || operator_type == LT ||
             operator_type == GE || operator_type == GT);
       }
       bool isLogicOp(int operator_type) {
-        return (operator_type == AND || operator_type == OR || operator_type == NOT);
+        return (operator_type == AND || operator_type == OR ||
+            operator_type == NOT);
       }
   };
 
