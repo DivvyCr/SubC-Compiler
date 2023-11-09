@@ -17,4 +17,4 @@ namespace minic_code_generator {
   std::nullptr_t raiseError(const char* msg);
 }
 
-#endif
+#endif // _CODEGEN_H

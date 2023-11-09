@@ -38,14 +38,37 @@ namespace minic_code_generator {
 
   class BaseCodeGenerator {
     public:
-      BaseCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable symbols, FunctionTable functions)
+      BaseCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable *symbols, FunctionTable *functions)
         : TheContext(llvmContext), TheModule(llvmModule), TheBuilder(irBuilder), Symbols(symbols), Functions(functions) {}
+
       LLVMContext *getContext() { return TheContext; }
       Module *getModule() { return TheModule; }
       IRBuilder<> *getBuilder() { return TheBuilder; }
+
+      Type *getIntType() { return Type::getInt32Ty(*getContext()); }
+      Type *getFloatType() { return Type::getFloatTy(*getContext()); }
+      Type *getBoolType() { return Type::getInt1Ty(*getContext()); }
+      Type *getVoidType() { return Type::getVoidTy(*getContext()); }
+
+      Type *convertNonVoidType(MiniCType minic_type) {
+        switch (minic_type) {
+          case INTEGER: return getIntType();
+          case FLOAT: return getFloatType();
+          case BOOL: return getBoolType();
+          case VOID: return nullptr;
+          case UNKNOWN: return nullptr;
+        }
+        return nullptr;
+      }
     protected:
-      SymbolTable Symbols;
-      FunctionTable Functions;
+      SymbolTable *Symbols;
+      FunctionTable *Functions;
+
+      AllocaInst *createEntryBlockAlloca(Function *function, Type *variable_type, StringRef variable_name) {
+        IRBuilder<> tmp_builder(&function->getEntryBlock(), function->getEntryBlock().begin());
+        AllocaInst *variable_alloca = tmp_builder.CreateAlloca(variable_type, nullptr, variable_name);
+        return variable_alloca;
+      }
     private:
       LLVMContext *TheContext;
       Module *TheModule;
@@ -59,7 +82,7 @@ namespace minic_code_generator {
     std::map<int, CmpInst::Predicate> fCmpOps;
 
     public:
-      ExpressionCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable symbols, FunctionTable functions)
+      ExpressionCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable *symbols, FunctionTable *functions)
         : BaseCodeGenerator(llvmContext, llvmModule, irBuilder, symbols, functions) {
         // LOGIC:
         iOps[AND] = Instruction::BinaryOps::And;
@@ -71,7 +94,6 @@ namespace minic_code_generator {
         iOps[MULT] = Instruction::BinaryOps::Mul;
         iOps[DIV] = Instruction::BinaryOps::SDiv;
         iOps[MOD] = Instruction::BinaryOps::SRem;
-        // iOps[NOT] = ONLY FLOAT NEGATION EXISTS?
         iCmpOps[EQ] = CmpInst::Predicate::ICMP_EQ;
         iCmpOps[NE] = CmpInst::Predicate::ICMP_NE;
         iCmpOps[GT] = CmpInst::Predicate::ICMP_SGT;
@@ -86,7 +108,6 @@ namespace minic_code_generator {
         fOps[MULT] = Instruction::BinaryOps::FMul;
         fOps[DIV] = Instruction::BinaryOps::FDiv;
         fOps[MOD] = Instruction::BinaryOps::FRem;
-        // fOps[NOT] = &IRBuilder<>::CreateFNeg;
         fCmpOps[EQ] = CmpInst::Predicate::FCMP_OEQ;
         fCmpOps[NE] = CmpInst::Predicate::FCMP_ONE;
         fCmpOps[GT] = CmpInst::Predicate::FCMP_OGT;
@@ -113,51 +134,42 @@ namespace minic_code_generator {
       void* visit(VariableAST &node) {
         AllocaInst *variable_alloca;
         GlobalVariable *global_variable;
-        Type *variable_type;
-        string tmp = "Unknown variable: ";
-        switch (node.getType()) {
-          case INTEGER:
-            variable_type = Type::getInt32Ty(*getContext());
-            break;
-          case FLOAT:
-            variable_type = Type::getFloatTy(*getContext());
-            break;
-          case BOOL:
-            variable_type = Type::getInt1Ty(*getContext());
-            break;
-          case UNKNOWN:
-            variable_alloca = Symbols[node.getIdentifier()];
-            global_variable = getModule()->getNamedGlobal(node.getIdentifier());
-            if (variable_alloca) {
-              return getBuilder()->CreateLoad(variable_alloca->getAllocatedType(), variable_alloca, node.getIdentifier().c_str());
-            } else if (global_variable) {
-              return getBuilder()->CreateLoad(global_variable->getValueType(), global_variable);
-            }
-            tmp += node.getIdentifier();
-            return raiseError(tmp.c_str());
-          default:
-            // Impossible to reach here due to parser.
-            return nullptr;
+
+        Type *variable_type = convertNonVoidType(node.getType());
+        if (!variable_type) { // Must be UNKNOWN, due to parser
+          variable_alloca = (*Symbols)[node.getIdentifier()];
+          global_variable = getModule()->getNamedGlobal(node.getIdentifier());
+          if (variable_alloca) { // Try local first, to effectively shadow any global variables:
+            return getBuilder()->CreateLoad(variable_alloca->getAllocatedType(), variable_alloca, node.getIdentifier().c_str());
+          } else if (global_variable) { // Try global after local:
+            return getBuilder()->CreateLoad(global_variable->getValueType(), global_variable);
+          }
+          string logstr = "Unknown variable: " + node.getIdentifier();
+          return raiseError(logstr.c_str());
         }
 
         Function *llvm_parent_function = getBuilder()->GetInsertBlock()->getParent();
         variable_alloca = createEntryBlockAlloca(llvm_parent_function, variable_type, node.getIdentifier());
-        Symbols[node.getIdentifier()] = variable_alloca;
+        (*Symbols)[node.getIdentifier()] = variable_alloca;
         return variable_alloca;
       }
       void* visit(AssignmentAST &node) {
-        AllocaInst *assignee = Symbols[node.getIdentifier()];
-        GlobalVariable *global_variable = getModule()->getNamedGlobal(node.getIdentifier());
+        string assignee_ident = node.getIdentifier();
+        AllocaInst *assignee = (*Symbols)[assignee_ident];
+
+        GlobalVariable *global_variable = getModule()->getNamedGlobal(assignee_ident);
 
         Value *expression = generateCode(*node.getAssignment());
         if (!expression) return nullptr;
         
         if (assignee) {
+          // TODO: Handle int-to-float conversion.
           if (assignee->getAllocatedType() != expression->getType()) {
             return raiseError("Mismatched types on assignment.");
           }
           getBuilder()->CreateStore(expression, assignee);
         } else if (global_variable) {
+          // TODO: Handle int-to-float conversion.
           if (global_variable->getValueType() != expression->getType()) {
             return raiseError("Mismatched types on assignment.");
           }
@@ -187,10 +199,22 @@ namespace minic_code_generator {
       void* visit(UnaryExpressionAST &node) {
         Value *expression = generateCode(*node.getExpression());
         if (!expression) return nullptr;
+        Type *expression_type = expression->getType();
 
         switch (node.getOperator().type) {
           case MINUS:
-            return getBuilder()->CreateFNeg(expression);
+            if (expression_type->isFloatTy()) {
+              return getBuilder()->CreateFNeg(expression); // Flips sign bit
+            } else if (expression_type->isIntegerTy(32)) {
+              return getBuilder()->CreateNeg(expression); // Subtracts from 0, potential overflow
+            } else {
+              return raiseError("Cannot NEGATE non-arithmetic expression");
+            }
+          case NOT:
+            if (!expression_type->isIntegerTy(1)) {
+              return raiseError("Cannot apply NOT to non-boolean expression");
+            }
+            return getBuilder()->CreateNot(expression); // Applies (1 XOR expression)
           default:
             break;
         }
@@ -220,11 +244,11 @@ namespace minic_code_generator {
         if (left_type->isFloatTy() || right_type->isFloatTy()) {
           is_float = true;
 
-          if (left_type->isIntegerTy()) {
-            left = getBuilder()->CreateSIToFP(left, Type::getFloatTy(*getContext()), "convert");
+          if (left_type->isIntegerTy(32)) {
+            left = getBuilder()->CreateSIToFP(left, getFloatType(), "convert");
           }
-          if (right_type->isIntegerTy()) {
-            right = getBuilder()->CreateSIToFP(right, Type::getFloatTy(*getContext()), "convert");
+          if (right_type->isIntegerTy(32)) {
+            right = getBuilder()->CreateSIToFP(right, getFloatType(), "convert");
           }
         }
 
@@ -261,7 +285,7 @@ namespace minic_code_generator {
     ExpressionCodeGenerator ExpressionGenerator;
 
     public:
-      StatementCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable symbols, FunctionTable functions)
+      StatementCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable *symbols, FunctionTable *functions)
         : BaseCodeGenerator(llvmContext, llvmModule, irBuilder, symbols, functions),
         ExpressionGenerator(llvmContext, llvmModule, irBuilder, symbols, functions) {}
 
@@ -333,9 +357,14 @@ namespace minic_code_generator {
       }
       void visit(ReturnAST &node) {
         // TODO: Check that the function returns appropriate TYPE.
-        Value *expression = ExpressionGenerator.generateCode(*node.getBody());
-        if (!expression) return;
-        getBuilder()->CreateRet(expression);
+        if (node.getBody()) {
+          Value *expression = ExpressionGenerator.generateCode(*node.getBody());
+          if (!expression) return;
+
+          getBuilder()->CreateRet(expression);
+          return;
+        }
+        getBuilder()->CreateRetVoid();
       }
   };
 
@@ -343,25 +372,14 @@ namespace minic_code_generator {
     StatementCodeGenerator StatementGenerator;
 
     public:
-      ProgramCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable symbols, FunctionTable functions)
+      ProgramCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable *symbols, FunctionTable *functions)
         : BaseCodeGenerator(llvmContext, llvmModule, irBuilder, symbols, functions),
         StatementGenerator(llvmContext, llvmModule, irBuilder, symbols, functions) {}
 
       void generateGlobal(GlobalVariableAST &node) {
-        Type *variable_type;
-        switch (node.getVariable()->getType()) {
-          case INTEGER:
-            variable_type = Type::getInt32Ty(*getContext());
-            break;
-          case FLOAT:
-            variable_type = Type::getFloatTy(*getContext());
-            break;
-          case BOOL:
-            variable_type = Type::getInt1Ty(*getContext());
-            break;
-          default:
-            return;
-        }
+        Type *variable_type = convertNonVoidType(node.getVariable()->getType());
+        if (!variable_type) return;
+
         getModule()->getOrInsertGlobal(node.getVariable()->getIdentifier(), variable_type);
       }
 
@@ -369,41 +387,19 @@ namespace minic_code_generator {
         vector<Type *> parameter_types;
         for (int i = 0; i < node.getParameters().size(); i++) {
           MiniCType parameter_minictype = node.getParameters()[i]->getType();
-          Type *parameter_type;
-          switch (parameter_minictype) {
-            case INTEGER:
-              parameter_type = Type::getInt32Ty(*getContext());
-              break;
-            case FLOAT:
-              parameter_type = Type::getFloatTy(*getContext());
-              break;
-            case BOOL:
-              parameter_type = Type::getInt1Ty(*getContext());
-              break;
-            default:
-              // Impossible to reach here due to parser.
-              return;
+          Type *parameter_type = convertNonVoidType(parameter_minictype);
+          if (!parameter_type) { // Shouldn't be able to enter here, due to parser
+            raiseError("Malformed parameter type");
+            return;
           }
           parameter_types.push_back(parameter_type);    
         }
 
-        Type *return_type;
-        switch (node.getReturnType()) {
-          case INTEGER:
-            return_type = Type::getInt32Ty(*getContext());
-            break;
-          case FLOAT:
-            return_type = Type::getFloatTy(*getContext());
-            break;
-          case BOOL:
-            return_type = Type::getInt1Ty(*getContext());
-            break;
-          case VOID:
-            return_type = Type::getVoidTy(*getContext());
-            break;
-          default:
-            // Impossible to reach here due to parser.
-            return;
+        MiniCType return_minictype = node.getReturnType();
+        Type *return_type = (return_minictype == VOID) ? getVoidType() : convertNonVoidType(return_minictype);
+        if (!return_type) { // Shouldn't be able to enter here, due to parser
+          raiseError("Malformed return type");
+          return;
         }
 
         FunctionType *function_type = FunctionType::get(return_type, parameter_types, false);
@@ -415,31 +411,40 @@ namespace minic_code_generator {
           arg.setName(node.getParameters()[i++]->getIdentifier());
         }
 
-        Functions[node.getIdentifier()] = &node;
+        (*Functions)[node.getIdentifier()] = &node;
         return;
       }
 
       void generateFunction(FunctionAST &node) {
         auto &prototype = *node.getPrototype();
         string function_name = node.getPrototype()->getIdentifier();
-        Functions[function_name] = &*node.getPrototype();
-        Function *llvm_function = getPrototypeFor(function_name);
+        (*Functions)[function_name] = &*node.getPrototype();
 
+        Function *llvm_function = getModule()->getFunction(function_name);
+        if (!llvm_function) {
+          PrototypeAST *proto = (*Functions)[function_name];
+          if (!proto) {
+            raiseError("Function not known");
+            return;
+          }
+          generatePrototype(*proto);
+          llvm_function = getModule()->getFunction(function_name);
+        }
         if (!llvm_function) return;
 
         BasicBlock *llvm_block = BasicBlock::Create(*getContext(), "entry", llvm_function);
         getBuilder()->SetInsertPoint(llvm_block);
 
-        Symbols.clear();
+        Symbols->clear();
         for (auto &llvm_argument : llvm_function->args()) {
           AllocaInst *argument_alloca = createEntryBlockAlloca(llvm_function, llvm_argument.getType(), llvm_argument.getName());
           getBuilder()->CreateStore(&llvm_argument, argument_alloca);
-          Symbols[string(llvm_argument.getName())] = argument_alloca;
+          (*Symbols)[string(llvm_argument.getName())] = argument_alloca;
         }
 
         StatementGenerator.generateCode(*node.getBody());
         verifyFunction(*llvm_function);
-        return;
+        return; // TODO: Handle missing return statements.
       }
 
       void generateProgram(const ProgramAST &node) {
@@ -447,21 +452,6 @@ namespace minic_code_generator {
         for (auto &g : node.getGlobals()) generateGlobal(*g);
         for (auto &f : node.getFunctions()) generateFunction(*f);
         getModule()->print(outs(), nullptr);
-      }
-
-    private:
-      Function *getPrototypeFor(const string &identifier) {
-        Function *function = getModule()->getFunction(identifier);
-        if (function) { return function; }
-
-        auto prototype_iterator = Functions.find(identifier);
-        if (prototype_iterator != Functions.end()) {
-          // Cannot return directly from generateCode(..):
-          generatePrototype(*prototype_iterator->second);
-          return getModule()->getFunction(identifier);
-        }
-
-        return raiseError("Function not known.");
       }
   };
 
@@ -472,14 +462,8 @@ namespace minic_code_generator {
 
     SymbolTable ss;
     FunctionTable fs;
-
-    ProgramCodeGenerator(&MiniCContext, MiniCModule.get(), &MiniCBuilder, ss, fs).generateProgram(node);
-  }
-
-  AllocaInst *createEntryBlockAlloca(Function *function, Type *variable_type, StringRef variable_name) {
-    IRBuilder<> tmp_builder(&function->getEntryBlock(), function->getEntryBlock().begin());
-    AllocaInst *variable_alloca = tmp_builder.CreateAlloca(variable_type, nullptr, variable_name);
-    return variable_alloca;
+    
+    ProgramCodeGenerator(&MiniCContext, MiniCModule.get(), &MiniCBuilder, &ss, &fs).generateProgram(node);
   }
 
   std::nullptr_t raiseError(const char* msg) {

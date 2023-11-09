@@ -412,7 +412,7 @@ namespace minic_parser {
         return first_operand;
       }
     }
-    return raiseError("parseExpression: Expected a numeric/boolean expression or an assignment");
+    return raiseError("parseExpression: Expected a numeric/boolean expression, an assignment, or ';'");
   }
 
   static PtrExpressionAST parseOptAssign(TOKEN token, const string &ident) {
