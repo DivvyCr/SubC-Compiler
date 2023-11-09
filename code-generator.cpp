@@ -39,7 +39,7 @@ namespace minic_code_generator {
   class BaseCodeGenerator {
     public:
       BaseCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable *symbols, FunctionTable *functions)
-        : TheContext(llvmContext), TheModule(llvmModule), TheBuilder(irBuilder), Symbols(symbols), Functions(functions) {}
+        : TheContext(llvmContext), TheModule(llvmModule), TheBuilder(irBuilder), LocalVariableTable(symbols), Functions(functions) {}
 
       LLVMContext *getContext() { return TheContext; }
       Module *getModule() { return TheModule; }
@@ -55,13 +55,12 @@ namespace minic_code_generator {
           case INTEGER: return getIntType();
           case FLOAT: return getFloatType();
           case BOOL: return getBoolType();
-          case VOID: return nullptr;
-          case UNKNOWN: return nullptr;
+          default: break;
         }
         return nullptr;
       }
     protected:
-      SymbolTable *Symbols;
+      SymbolTable *LocalVariableTable;
       FunctionTable *Functions;
 
       AllocaInst *createEntryBlockAlloca(Function *function, Type *variable_type, StringRef variable_name) {
@@ -123,39 +122,48 @@ namespace minic_code_generator {
 
     private:
       void* visit(IntAST &node) {
-        return ConstantInt::get(*getContext(), APInt(32, node.getValue(), true));
+        return ConstantInt::get(getIntType(), node.getValue(), /*isSigned:*/ true);
       }
       void* visit(FloatAST &node) {
-        return ConstantFP::get(*getContext(), APFloat(node.getValue()));
+        return ConstantFP::get(getFloatType(), node.getValue());
       }
       void* visit(BoolAST &node) {
-        return ConstantInt::get(*getContext(), APInt(1, node.getValue(), false));
+        return ConstantInt::get(getBoolType(), node.getValue(), /*isSigned:*/ false);
       }
       void* visit(VariableAST &node) {
-        AllocaInst *variable_alloca;
-        GlobalVariable *global_variable;
-
+        string variable_name = node.getIdentifier();
         Type *variable_type = convertNonVoidType(node.getType());
-        if (!variable_type) { // Must be UNKNOWN, due to parser
-          variable_alloca = (*Symbols)[node.getIdentifier()];
-          global_variable = getModule()->getNamedGlobal(node.getIdentifier());
-          if (variable_alloca) { // Try local first, to effectively shadow any global variables:
-            return getBuilder()->CreateLoad(variable_alloca->getAllocatedType(), variable_alloca, node.getIdentifier().c_str());
-          } else if (global_variable) { // Try global after local:
-            return getBuilder()->CreateLoad(global_variable->getValueType(), global_variable);
-          }
-          string logstr = "Unknown variable: " + node.getIdentifier();
-          return raiseError(logstr.c_str());
+        AllocaInst *variable_alloca = (*LocalVariableTable)[variable_name];
+
+        if (variable_alloca && variable_type) {
+          return raiseError(("Redeclaration of local variable: " + variable_name).c_str());
         }
 
-        Function *llvm_parent_function = getBuilder()->GetInsertBlock()->getParent();
-        variable_alloca = createEntryBlockAlloca(llvm_parent_function, variable_type, node.getIdentifier());
-        (*Symbols)[node.getIdentifier()] = variable_alloca;
-        return variable_alloca;
+        if (variable_alloca && !variable_type) {
+          // Use of declared variable, so load it:
+          // NOTE: This effectively shadows global variables, by virtue of being checked earlier
+          return getBuilder()->CreateLoad(variable_alloca->getAllocatedType(), variable_alloca, variable_name);
+        }
+
+        if (!variable_alloca && variable_type) {
+          // Declaration of a new variable:
+          // NOTE: This will shadow global variables, see above
+          Function *parent_function = getBuilder()->GetInsertBlock()->getParent();
+          AllocaInst *new_variable_alloca = createEntryBlockAlloca(parent_function, variable_type, variable_name);
+          (*LocalVariableTable)[node.getIdentifier()] = new_variable_alloca;
+          return new_variable_alloca;
+        }
+
+        // By this point, we must have (!variable_alloca && !variable_type)
+        // Use of undeclared variable, so check whether can use global or throw error:
+        GlobalVariable *global_variable = getModule()->getNamedGlobal(variable_name);
+        return (global_variable) 
+          ? getBuilder()->CreateLoad(global_variable->getValueType(), global_variable)
+          : raiseError(("Use of undeclared variable: " + variable_name).c_str());
       }
       void* visit(AssignmentAST &node) {
         string assignee_ident = node.getIdentifier();
-        AllocaInst *assignee = (*Symbols)[assignee_ident];
+        AllocaInst *assignee = (*LocalVariableTable)[assignee_ident];
 
         GlobalVariable *global_variable = getModule()->getNamedGlobal(assignee_ident);
 
@@ -435,11 +443,11 @@ namespace minic_code_generator {
         BasicBlock *llvm_block = BasicBlock::Create(*getContext(), "entry", llvm_function);
         getBuilder()->SetInsertPoint(llvm_block);
 
-        Symbols->clear();
+        LocalVariableTable->clear();
         for (auto &llvm_argument : llvm_function->args()) {
           AllocaInst *argument_alloca = createEntryBlockAlloca(llvm_function, llvm_argument.getType(), llvm_argument.getName());
           getBuilder()->CreateStore(&llvm_argument, argument_alloca);
-          (*Symbols)[string(llvm_argument.getName())] = argument_alloca;
+          (*LocalVariableTable)[string(llvm_argument.getName())] = argument_alloca;
         }
 
         StatementGenerator.generateCode(*node.getBody());
