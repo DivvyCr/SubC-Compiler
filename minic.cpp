@@ -28,7 +28,7 @@ int main(int argc, char **argv) {
   // Run parser, print the AST, and generate the IR:
   PtrProgramAST root = parseProgram(input_file);
   if (root) {
-    // cout << *root << "\n";
+    cout << *root << "\n";
     generate(*root);
   } else {
     fprintf(stderr, "Parsing error!\n");
