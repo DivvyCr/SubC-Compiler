@@ -124,7 +124,7 @@ namespace minic_code_generator {
         AllocaInst *variable_alloca = (*LocalVariables)[variable_name];
 
         if (variable_alloca && variable_type) {
-          return errorExit(("Cannot redeclare local variable: " + variable_name).c_str());
+          return throwError(("Cannot redeclare local variable: " + variable_name).c_str());
         }
 
         if (variable_alloca && !variable_type) {
@@ -147,7 +147,7 @@ namespace minic_code_generator {
         GlobalVariable *global_variable = getModule()->getNamedGlobal(variable_name);
         return (global_variable) 
           ? getBuilder()->CreateLoad(global_variable->getValueType(), global_variable)
-          : errorExit(("Cannot reference undeclared variable: " + variable_name).c_str());
+          : throwError(("Cannot reference undeclared variable: " + variable_name).c_str());
       }
       void* visit(AssignmentAST &node) {
         string assignee_name = node.getIdentifier();
@@ -155,27 +155,27 @@ namespace minic_code_generator {
         GlobalVariable *global_variable = getModule()->getNamedGlobal(assignee_name);
 
         Value *expression = generateCode(*node.getAssignment());
-        if (!expression) return errorExit("Malformed assignment expression");
+        if (!expression) return throwError("Malformed assignment expression");
 
         // Try to assign local variable first, to shadow any global variables:
         if (assignee_alloca) return storeAssignment(assignee_alloca, expression, assignee_alloca->getAllocatedType());
         if (global_variable) return storeAssignment(global_variable, expression, global_variable->getValueType());
-        return errorExit("Unknown variable for assignment");
+        return throwError("Unknown variable for assignment");
       }
       void* visit(FunctionCallAST &node) {
         Function *called_function = getModule()->getFunction(node.getIdentifier());
-        if (!called_function) return errorExit("Unknown function called");
+        if (!called_function) return throwError("Unknown function called");
 
         int num_expected_arguments = called_function->arg_size();
         int num_supplied_arguments = node.getArguments().size();
         if (num_supplied_arguments != num_expected_arguments) {
-          return errorExit("Invalid number of arguments in function call");
+          return throwError("Invalid number of arguments in function call");
         }
 
         vector<Value *> arguments;
         for (PtrExpressionAST &arg_expression : node.getArguments()) {
           Value *arg = generateCode(*arg_expression);
-          if (!arg) return errorExit("Malformed argument in function call");
+          if (!arg) return throwError("Malformed argument in function call");
           arguments.push_back(arg);
         }
         return getBuilder()->CreateCall(called_function, arguments);
@@ -191,16 +191,16 @@ namespace minic_code_generator {
             if (expression_type->isIntegerTy(32)) {
               return getBuilder()->CreateNeg(expression); // Subtracts from 0, potential overflow
             }
-            return errorExit("Cannot negate non-arithmetic expression");
+            return throwError("Cannot negate non-arithmetic expression");
           case NOT:
             if (expression_type->isIntegerTy(1)) {
               return getBuilder()->CreateNot(expression); // Applies (1 XOR expression)
             }
-            return errorExit("Cannot apply NOT to non-boolean expression");
+            return throwError("Cannot apply NOT to non-boolean expression");
           default:
             break;
         }
-        return errorExit("Unknown or inappropriate unary operator");
+        return throwError("Unknown or inappropriate unary operator");
       }
       void* visit(BinaryExpressionAST &node) {
         // Initialise LHS and RHS:
@@ -220,7 +220,7 @@ namespace minic_code_generator {
           operands_type = BOOL;
         }
         if (left->getType() != right->getType()) {
-          return errorExit("Mismatched expression types (for arithmetic operation)"); 
+          return throwError("Mismatched expression types (for arithmetic operation)"); 
         }
 
         // Generate appropriate instruction:
@@ -235,13 +235,13 @@ namespace minic_code_generator {
           return getBuilder()->CreateCmp(comparison_instructions[{operator_type, operands_type}], left, right);
         }
 
-        return errorExit("Unknown or inappropriate binary operator");
+        return throwError("Unknown or inappropriate binary operator");
       }
 
       Value* storeAssignment(Value *assignee, Value *assignment, Type *assignee_type) {
         Type *assignment_type = assignment->getType();
         if (assignee_type->isIntegerTy(32) && assignment_type->isFloatTy()) {
-          errorExit("Cannot assign float value to integer variable, due to loss of precision");
+          throwError("Cannot assign float value to integer variable, due to loss of precision");
           exit(1);
         }
         if (assignee_type->isFloatTy() && assignment_type->isIntegerTy(32)) {
@@ -253,7 +253,7 @@ namespace minic_code_generator {
           return assignment;
         }
 
-        return errorExit("Mismatched types on assignment");
+        return throwError("Mismatched types on assignment");
       }
 
       void convertToFloatIfInt(Value **value, Type *value_type) {
@@ -297,10 +297,10 @@ namespace minic_code_generator {
         ExpressionGenerator.generateCode(*node.getExpression());
       }
       void visit(CodeBlockAST &node) {
-        for (PtrVariableAST &var : node.getDeclarations()) {
+        for (const PtrVariableAST &var : node.getDeclarations()) {
           ExpressionGenerator.generateCode(*var);
         }
-        for (PtrStatementAST &stmt : node.getStatements()) {
+        for (const PtrStatementAST &stmt : node.getStatements()) {
           generateCode(*stmt);
         }
       }
@@ -358,7 +358,7 @@ namespace minic_code_generator {
         // Type-check:
         if ((return_body && parent_function->getReturnType() != return_body->getType()) ||
             (!return_body && parent_function->getReturnType() != getVoidType())) {
-          errorExit("Mismatched function return type and return statement");
+          throwError("Mismatched function return type and return statement");
         }
 
         // Generate return statement:
@@ -381,7 +381,7 @@ namespace minic_code_generator {
 
       void generateGlobal(GlobalVariableAST &node) {
         Type *variable_type = convertNonVoidType(node.getVariable()->getType());
-        if (!variable_type) errorExit("Malformed global variable type");
+        if (!variable_type) throwError("Malformed global variable type");
 
         getModule()->getOrInsertGlobal(node.getVariable()->getIdentifier(), variable_type);
       }
@@ -391,20 +391,20 @@ namespace minic_code_generator {
         vector<Type *> parameter_types;
         for (const PtrVariableAST &var : node.getParameters()) {
           Type *parameter_type = convertNonVoidType(var->getType());
-          if (!parameter_type) errorExit("Malformed parameter type");
+          if (!parameter_type) throwError("Malformed parameter type");
           parameter_types.push_back(parameter_type);    
         }
         // Convert parsed type to LLVM Type:
         MiniCType return_minictype = node.getReturnType();
         Type *return_type = (return_minictype == VOID) ? getVoidType() : convertNonVoidType(return_minictype);
-        if (!return_type) errorExit("Malformed return type");
+        if (!return_type) throwError("Malformed return type");
         // Generate LLVM function signature:
         FunctionType *function_signature = FunctionType::get(return_type, parameter_types, false);
         
         // Check whether the same function exists:
         Function *existing_function = getModule()->getFunction(node.getIdentifier());
         if (existing_function && existing_function->getFunctionType() == function_signature) {
-          errorExit("Cannot redeclare function"); // NOTE: Relying on lazy evaluation above
+          throwError("Cannot redeclare function"); // NOTE: Relying on lazy evaluation above
         }
 
         // Declare LLVM Function:
@@ -420,7 +420,7 @@ namespace minic_code_generator {
         // Generate function signature and declare function:
         generatePrototype(*node.getPrototype());
         Function *function = getModule()->getFunction(node.getPrototype()->getIdentifier());
-        if (!function) errorExit("Unknown function");
+        if (!function) throwError("Unknown function");
 
         // Generate block for function body:
         BasicBlock *functionBodyBlock = BasicBlock::Create(*getContext(), "entry", function);
@@ -441,7 +441,7 @@ namespace minic_code_generator {
           if (function->getReturnType()->isVoidTy()) {
             getBuilder()->CreateRetVoid();
           } else {
-            errorExit("Non-void function must have a return statement");
+            throwError("Non-void function must have a return statement");
           }
         }
         // LLVM-supplied function to catch consistency bugs:
@@ -449,9 +449,9 @@ namespace minic_code_generator {
       }
 
       void generateProgram(const ProgramAST &node) {
-        for (auto &e : node.getExterns()) generatePrototype(*e);
-        for (auto &g : node.getGlobals()) generateGlobal(*g);
-        for (auto &f : node.getFunctions()) generateFunction(*f);
+        for (const PtrGlobalVariableAST &g : node.getGlobals()) generateGlobal(*g);
+        for (const PtrPrototypeAST &e : node.getExterns()) generatePrototype(*e);
+        for (const PtrFunctionAST &f : node.getFunctions()) generateFunction(*f);
         getModule()->print(outs(), nullptr);
       }
   };
@@ -464,7 +464,8 @@ namespace minic_code_generator {
     ProgramCodeGenerator(&MiniCContext, MiniCModule.get(), &fs).generateProgram(node);
   }
 
-  std::nullptr_t errorExit(const char* msg) {
+  std::nullptr_t throwError(const char* msg) {
+    // TODO: Use tokens from AST nodes to pin-point line and column of error.
     fprintf(stderr, "Error: %s\n", msg);
     exit(1);
     return nullptr;

@@ -17,9 +17,9 @@ namespace minic_printer {
       Printer(std::ostream &out) : Out(out) {}
 
       void print(const ProgramAST &node) {
-        for (auto &e : node.getExterns()) print(*e);
-        for (auto &g : node.getGlobals()) print(*g);
-        for (auto &f : node.getFunctions()) print(*f);
+        for (const PtrGlobalVariableAST &g : node.getGlobals()) print(*g);
+        for (const PtrPrototypeAST &e : node.getExterns()) print(*e);
+        for (const PtrFunctionAST &f : node.getFunctions()) print(*f);
       }
 
       void print(const ExpressionAST &node, bool deepen = true) {
@@ -89,7 +89,7 @@ namespace minic_printer {
       }
       void* visit(FunctionCallAST &node) override {
         Out << CurrentPrefix << "CALL: " << node.getIdentifier();
-        for (auto &arg : node.getArguments()) print(*arg);
+        for (const PtrExpressionAST &arg : node.getArguments()) print(*arg);
         return nullptr;
       }
       void* visit(UnaryExpressionAST &node) override {
@@ -108,8 +108,8 @@ namespace minic_printer {
       }
       void visit(CodeBlockAST &node) override {
         Out << CurrentPrefix << "Block:";
-        for (auto &decl : node.getDeclarations()) print(*decl);
-        for (auto &stmt : node.getStatements()) print(*stmt);
+        for (const PtrVariableAST &decl : node.getDeclarations()) print(*decl);
+        for (const PtrStatementAST &stmt : node.getStatements()) print(*stmt);
       }
       void visit(IfBlockAST &node) override {
         Out << CurrentPrefix << "IF:";
@@ -139,7 +139,7 @@ namespace minic_printer {
       }
       void print(const PrototypeAST &node) {
         Out << "\n" << CurrentPrefix << "Prototype: " << node.getIdentifier();
-        for (auto &param : node.getParameters()) print(*param);
+        for (const PtrVariableAST &param : node.getParameters()) print(*param);
       }
       void print(const FunctionAST &node) {
         Out << "\n" << CurrentPrefix << "Function:";
