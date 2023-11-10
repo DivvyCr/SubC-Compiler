@@ -124,7 +124,7 @@ class VariableAST : public ExpressionAST {
     VariableAST(TOKEN token, const string &ident, MiniCType type)
       : Token(token), Identifier(ident), Type(type) {}
     void *dispatch(ExpressionVisitor &visitor) override { return visitor.visit(*this); }
-    string getIdentifier() const { return Identifier; }
+    const string getIdentifier() const { return Identifier; }
     MiniCType getType() { return Type; }
   private:
     TOKEN Token;
@@ -139,7 +139,7 @@ class AssignmentAST : public ExpressionAST {
       : Token(token), Identifier(ident),
       Assignment(std::move(assignment)) {}
     void *dispatch(ExpressionVisitor &visitor) override { return visitor.visit(*this); }
-    string getIdentifier() const { return Identifier; }
+    const string getIdentifier() const { return Identifier; }
     PtrExpressionAST &getAssignment() { return Assignment; }
   private:
     TOKEN Token;
@@ -155,7 +155,7 @@ class FunctionCallAST : public ExpressionAST {
       Arguments(std::make_move_iterator(arguments.begin()),
       std::make_move_iterator(arguments.end())) {}
     void *dispatch(ExpressionVisitor &visitor) override { return visitor.visit(*this); }
-    string getIdentifier() const { return Identifier; }
+    const string getIdentifier() const { return Identifier; }
     vector<PtrExpressionAST> &getArguments() { return Arguments; }
   private:
     TOKEN Token;
@@ -183,8 +183,8 @@ class BinaryExpressionAST : public ExpressionAST {
       : Operator(op), Left(std::move(left_expression)), Right(std::move(right_expression)) {}
     void *dispatch(ExpressionVisitor &visitor) override { return visitor.visit(*this); }
     TOKEN getOperator() const { return Operator; }
-    PtrExpressionAST &getLeft() { return Left; }
-    PtrExpressionAST &getRight() { return Right; }
+    const PtrExpressionAST &getLeft() const { return Left; }
+    const PtrExpressionAST &getRight() const { return Right; }
   private:
     TOKEN Operator;
     PtrExpressionAST Left, Right;
@@ -202,7 +202,7 @@ class ExpressionStatementAST : public StatementAST {
     ExpressionStatementAST(PtrExpressionAST expression)
       : Expression(std::move(expression)) {}
     void dispatch(StatementVisitor &visitor) override { return visitor.visit(*this); }
-    PtrExpressionAST &getExpression() { return Expression; }
+    const PtrExpressionAST &getExpression() const { return Expression; }
   private:
     PtrExpressionAST Expression;
 };
@@ -218,8 +218,8 @@ class CodeBlockAST : public StatementAST {
       Statements(std::make_move_iterator(statements.begin()),
           std::make_move_iterator(statements.end())) {}
     void dispatch(StatementVisitor &visitor) override { return visitor.visit(*this); }
-    vector<PtrVariableAST> &getDeclarations() { return Declarations; }
-    vector<PtrStatementAST> &getStatements() { return Statements; }
+    const vector<PtrVariableAST> &getDeclarations() const { return Declarations; }
+    const vector<PtrStatementAST> &getStatements() const { return Statements; }
   private:
     TOKEN Token;
     vector<PtrVariableAST> Declarations;
@@ -241,9 +241,9 @@ class IfBlockAST : public StatementAST {
       TrueBranch(std::move(true_branch)),
       FalseBranch(std::move(false_branch)) {}
     void dispatch(StatementVisitor &visitor) override { return visitor.visit(*this); }
-    PtrExpressionAST &getCondition() { return Condition; }
-    PtrCodeBlockAST &getTrueBranch() { return TrueBranch; }
-    PtrCodeBlockAST &getFalseBranch() { return FalseBranch; };
+    const PtrExpressionAST &getCondition() const { return Condition; }
+    const PtrCodeBlockAST &getTrueBranch() const { return TrueBranch; }
+    const PtrCodeBlockAST &getFalseBranch() const { return FalseBranch; };
   private:
     TOKEN Token;
     PtrExpressionAST Condition;
@@ -256,8 +256,8 @@ class WhileBlockAST : public StatementAST {
         PtrExpressionAST condition, PtrStatementAST body)
       : Token(token), Condition(std::move(condition)), Body(std::move(body)) {}
     void dispatch(StatementVisitor &visitor) override { return visitor.visit(*this); }
-    PtrExpressionAST &getCondition() { return Condition; }
-    PtrStatementAST &getBody() { return Body; }
+    const PtrExpressionAST &getCondition() const { return Condition; }
+    const PtrStatementAST &getBody() const { return Body; }
   private:
     TOKEN Token;
     PtrExpressionAST Condition;
@@ -271,7 +271,7 @@ class ReturnAST : public StatementAST {
     ReturnAST(TOKEN token, PtrExpressionAST body)
       : Token(token), Body(std::move(body)) {}
     void dispatch(StatementVisitor &visitor) override { return visitor.visit(*this); }
-    PtrExpressionAST &getBody() { return Body; }
+    const PtrExpressionAST &getBody() const { return Body; }
   private:
     TOKEN Token;
     PtrExpressionAST Body;
@@ -293,10 +293,9 @@ class PrototypeAST {
       : Token(token), Identifier(ident), ReturnType(return_type),
       Parameters(std::make_move_iterator(parameters.begin()),
           std::make_move_iterator(parameters.end())) {}
-    string getIdentifier() const { return Identifier; }
-    MiniCType getReturnType() const { return ReturnType; }
+    const string getIdentifier() const { return Identifier; }
+    MiniCType getReturnType() { return ReturnType; }
     const vector<PtrVariableAST> &getParameters() const { return Parameters; }
-    MiniCType getType();
   private:
     TOKEN Token;
     string Identifier;
@@ -320,22 +319,22 @@ class FunctionAST {
 
 class ProgramAST {
   public:
-    ProgramAST(vector<PtrPrototypeAST> externs,
-        vector<PtrFunctionAST> functions,
-        vector<PtrGlobalVariableAST> globals)
-          : Externs(std::make_move_iterator(externs.begin()),
+    ProgramAST(vector<PtrGlobalVariableAST> globals,
+        vector<PtrPrototypeAST> externs,
+        vector<PtrFunctionAST> functions)
+          : Globals(std::make_move_iterator(globals.begin()),
+              std::make_move_iterator(globals.end())),
+          Externs(std::make_move_iterator(externs.begin()),
               std::make_move_iterator(externs.end())),
           Functions(std::make_move_iterator(functions.begin()),
-              std::make_move_iterator(functions.end())),
-          Globals(std::make_move_iterator(globals.begin()),
-              std::make_move_iterator(globals.end())){}
+              std::make_move_iterator(functions.end())) {}
+    const vector<PtrGlobalVariableAST> &getGlobals() const { return Globals; }
     const vector<PtrPrototypeAST> &getExterns() const { return Externs; }
     const vector<PtrFunctionAST> &getFunctions() const { return Functions; }
-    const vector<PtrGlobalVariableAST> &getGlobals() const { return Globals; }
   private:
+    vector<PtrGlobalVariableAST> Globals;
     vector<PtrPrototypeAST> Externs;
     vector<PtrFunctionAST> Functions;
-    vector<PtrGlobalVariableAST> Globals;
 };
 
 #endif // _ABSTRACT_SYNTAX_H
