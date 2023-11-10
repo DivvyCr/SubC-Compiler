@@ -29,53 +29,55 @@ enum MiniCType {
   FLOAT = 2,
   BOOL = 3,
   VOID = 4,
-
-  UNKNOWN = -1
 };
 
 //
 // ABSTRACT SYNTAX TREE (AST):
 //
 
-// Declare all classes and pointer aliases:
+// Expressions:
+class ExpressionAST;
 class IntAST;
 class FloatAST;
 class BoolAST;
-class VariableAST;
+class VariableLoadAST;
 class AssignmentAST;
 class FunctionCallAST;
 class UnaryExpressionAST;
 class BinaryExpressionAST;
-class CodeBlockAST;
-class IfBlockAST;
-class WhileBlockAST;
-class ReturnAST;
-class GlobalVariableAST;
-class PrototypeAST;
-class FunctionAST;
-class ProgramAST;
-class ExpressionAST;
-class StatementAST;
-
+using PtrExpressionAST = unique_ptr<ExpressionAST>;
 using PtrIntAST = unique_ptr<IntAST>;
 using PtrFloatAST = unique_ptr<FloatAST>;
 using PtrBoolAST = unique_ptr<BoolAST>;
-using PtrVariableAST = unique_ptr<VariableAST>;
+using PtrVariableLoadAST = unique_ptr<VariableLoadAST>;
 using PtrAssignmentAST = unique_ptr<AssignmentAST>;
 using PtrFunctionCallAST = unique_ptr<FunctionCallAST>;
 using PtrUnaryExpressionAST = unique_ptr<UnaryExpressionAST>;
 using PtrBinaryExpressionAST = unique_ptr<BinaryExpressionAST>;
+// Statements:
+class StatementAST;
+class VariableAST;
+class ExpressionStatementAST;
+class CodeBlockAST;
+class IfBlockAST;
+class WhileBlockAST;
+class ReturnAST;
+using PtrStatementAST = unique_ptr<StatementAST>;
+using PtrVariableAST = unique_ptr<VariableAST>;
 using PtrExpressionStatementAST = unique_ptr<ExpressionStatementAST>;
 using PtrCodeBlockAST = unique_ptr<CodeBlockAST>;
 using PtrIfBlockAST = unique_ptr<IfBlockAST>;
 using PtrWhileBlockAST = unique_ptr<WhileBlockAST>;
 using PtrReturnAST = unique_ptr<ReturnAST>;
+// Top-level:
+class GlobalVariableAST;
+class PrototypeAST;
+class FunctionAST;
+class ProgramAST;
 using PtrGlobalVariableAST = unique_ptr<GlobalVariableAST>;
 using PtrPrototypeAST = unique_ptr<PrototypeAST>;
 using PtrFunctionAST = unique_ptr<FunctionAST>;
 using PtrProgramAST = unique_ptr<ProgramAST>;
-using PtrExpressionAST = unique_ptr<ExpressionAST>;
-using PtrStatementAST = unique_ptr<StatementAST>;
 
 // This class represents code constructs that hold some value.
 class ExpressionAST { 
@@ -117,19 +119,15 @@ class BoolAST : public ExpressionAST {
     bool Value;
 };
 
-class VariableAST : public ExpressionAST {
+class VariableLoadAST : public ExpressionAST {
   public:
-    VariableAST(TOKEN token, const string &ident)
-      : Token(token), Identifier(ident), Type(UNKNOWN) {}
-    VariableAST(TOKEN token, const string &ident, MiniCType type)
-      : Token(token), Identifier(ident), Type(type) {}
+    VariableLoadAST(TOKEN token, const string &ident)
+      : Token(token), Identifier(ident) {}
     void *dispatch(ExpressionVisitor &visitor) override { return visitor.visit(*this); }
     const string getIdentifier() const { return Identifier; }
-    MiniCType getType() { return Type; }
   private:
     TOKEN Token;
     string Identifier;
-    MiniCType Type;
 };
 
 class AssignmentAST : public ExpressionAST {
@@ -195,6 +193,18 @@ class StatementAST {
   public:
     virtual ~StatementAST() {}
     virtual void dispatch(StatementVisitor &v) = 0;
+};
+
+class VariableAST : public StatementAST {
+  public:
+    VariableAST(PtrVariableLoadAST variable, MiniCType declared_type)
+      : Variable(std::move(variable)), Type(declared_type) {}
+    void dispatch(StatementVisitor &visitor) override { return visitor.visit(*this); }
+    const PtrVariableLoadAST &getVariable() const { return Variable; }
+    MiniCType getType() { return Type; }
+  private:
+    PtrVariableLoadAST Variable;
+    MiniCType Type;
 };
 
 class ExpressionStatementAST : public StatementAST {

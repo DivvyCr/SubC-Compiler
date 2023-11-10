@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <set>
 #include <stdio.h>
 
 #include "llvm/ADT/APFloat.h"
@@ -67,7 +68,7 @@ namespace minic_code_generator {
   };
 
   class ExpressionCodeGenerator : public ExpressionVisitor, public BaseCodeGenerator {
-    SymbolTable *LocalVariables;
+    vector<SymbolTable *> *ScopedLocalVariables;
     FunctionTable *Functions;
 
     std::map<std::pair<int, MiniCType>, Instruction::BinaryOps> arithmetic_instructions = {
@@ -101,8 +102,8 @@ namespace minic_code_generator {
     };
 
     public:
-      ExpressionCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable *symbols, FunctionTable *functions)
-        : BaseCodeGenerator(llvmContext, llvmModule, irBuilder), LocalVariables(symbols), Functions(functions) {}
+      ExpressionCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, vector<SymbolTable *> *symbols, FunctionTable *functions)
+        : BaseCodeGenerator(llvmContext, llvmModule, irBuilder), ScopedLocalVariables(symbols), Functions(functions) {}
 
       Value* generateCode(const ExpressionAST &node) {
         return reinterpret_cast<Value *>(const_cast<ExpressionAST &>(node).dispatch(*this));
@@ -118,48 +119,42 @@ namespace minic_code_generator {
       void* visit(BoolAST &node) {
         return ConstantInt::get(getBoolType(), node.getValue(), /*isSigned:*/ false);
       }
-      void* visit(VariableAST &node) {
+      void* visit(VariableLoadAST &node) {
         string variable_name = node.getIdentifier();
-        Type *variable_type = convertNonVoidType(node.getType());
-        AllocaInst *variable_alloca = (*LocalVariables)[variable_name];
 
-        if (variable_alloca && variable_type) {
-          return throwError(("Cannot redeclare local variable: " + variable_name).c_str());
+        AllocaInst *variable_alloca;
+        for (int i = ScopedLocalVariables->size()-1; i >= 0; i--) {
+          variable_alloca = (*(*ScopedLocalVariables)[i])[variable_name];
+          if (variable_alloca) break;
         }
-
-        if (variable_alloca && !variable_type) {
-          // Use of declared variable, so load it:
-          // NOTE: This effectively shadows global variables, by virtue of being checked earlier
+        if (variable_alloca) {
           return getBuilder()->CreateLoad(variable_alloca->getAllocatedType(), variable_alloca, variable_name);
         }
 
-        if (!variable_alloca && variable_type) {
-          // Declaration of a new variable:
-          // NOTE: This will shadow global variables, see above
-          Function *parent_function = getBuilder()->GetInsertBlock()->getParent();
-          AllocaInst *new_variable_alloca = createEntryBlockAlloca(parent_function, variable_type, variable_name);
-          (*LocalVariables)[node.getIdentifier()] = new_variable_alloca;
-          return new_variable_alloca;
+        GlobalVariable *global_variable = getModule()->getNamedGlobal(variable_name);
+        if (global_variable) {
+          return getBuilder()->CreateLoad(global_variable->getValueType(), global_variable);
         }
 
-        // By this point, we must have (!variable_alloca && !variable_type)
-        // Use of undeclared variable, so check whether can use global or throw error:
-        GlobalVariable *global_variable = getModule()->getNamedGlobal(variable_name);
-        return (global_variable) 
-          ? getBuilder()->CreateLoad(global_variable->getValueType(), global_variable)
-          : throwError(("Cannot reference undeclared variable: " + variable_name).c_str());
+        return throwError(("Cannot reference undeclared variable: " + variable_name).c_str());
       }
       void* visit(AssignmentAST &node) {
-        string assignee_name = node.getIdentifier();
-        AllocaInst *assignee_alloca = (*LocalVariables)[assignee_name];
-        GlobalVariable *global_variable = getModule()->getNamedGlobal(assignee_name);
-
+        // Generate assignment:
         Value *expression = generateCode(*node.getAssignment());
-        if (!expression) return throwError("Malformed assignment expression");
 
         // Try to assign local variable first, to shadow any global variables:
+        string assignee_name = node.getIdentifier();
+
+        AllocaInst *assignee_alloca;
+        for (int i = ScopedLocalVariables->size()-1; i >= 0; i--) {
+          assignee_alloca = (*(*ScopedLocalVariables)[i])[assignee_name];
+          if (assignee_alloca) break;
+        }
+
         if (assignee_alloca) return storeAssignment(assignee_alloca, expression, assignee_alloca->getAllocatedType());
+        GlobalVariable *global_variable = getModule()->getNamedGlobal(assignee_name);
         if (global_variable) return storeAssignment(global_variable, expression, global_variable->getValueType());
+
         return throwError("Unknown variable for assignment");
       }
       void* visit(FunctionCallAST &node) {
@@ -281,28 +276,40 @@ namespace minic_code_generator {
 
   class StatementCodeGenerator : public StatementVisitor, public BaseCodeGenerator {
     ExpressionCodeGenerator ExpressionGenerator;
-    SymbolTable *LocalVariables;
+    vector<SymbolTable *> *ScopedLocalVariables;
     FunctionTable *Functions;
 
     public:
-      StatementCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, SymbolTable *symbols, FunctionTable *functions)
-        : BaseCodeGenerator(llvmContext, llvmModule, irBuilder), LocalVariables(symbols), Functions(functions),
+      StatementCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder, vector<SymbolTable *> *symbols, FunctionTable *functions)
+        : BaseCodeGenerator(llvmContext, llvmModule, irBuilder), ScopedLocalVariables(symbols), Functions(functions),
         ExpressionGenerator(llvmContext, llvmModule, irBuilder, symbols, functions) {}
 
       void generateCode(const StatementAST &node) {
         const_cast<StatementAST &>(node).dispatch(*this);
       }
 
+      void visit(VariableAST &node) {
+        string variable_name = node.getVariable()->getIdentifier();
+        Type *variable_type = convertNonVoidType(node.getType());
+        AllocaInst *variable_alloca = (*ScopedLocalVariables->back())[variable_name];
+
+        if (variable_alloca) {
+          throwError(("Cannot redeclare local variable: " + variable_name).c_str());
+        }
+
+        Function *parent_function = getBuilder()->GetInsertBlock()->getParent();
+        AllocaInst *new_variable_alloca = createEntryBlockAlloca(parent_function, variable_type, variable_name);
+        (*ScopedLocalVariables->back())[node.getVariable()->getIdentifier()] = new_variable_alloca;
+      }
       void visit(ExpressionStatementAST &node) {
         ExpressionGenerator.generateCode(*node.getExpression());
       }
       void visit(CodeBlockAST &node) {
-        for (const PtrVariableAST &var : node.getDeclarations()) {
-          ExpressionGenerator.generateCode(*var);
-        }
-        for (const PtrStatementAST &stmt : node.getStatements()) {
-          generateCode(*stmt);
-        }
+        SymbolTable new_scope;
+        ScopedLocalVariables->push_back(&new_scope);
+        for (const PtrVariableAST &var : node.getDeclarations()) generateCode(*var);
+        for (const PtrStatementAST &stmt : node.getStatements()) generateCode(*stmt);
+        ScopedLocalVariables->pop_back();
       }
       void visit(IfBlockAST &node) {
         Function *parent_function = getBuilder()->GetInsertBlock()->getParent();
@@ -383,13 +390,20 @@ namespace minic_code_generator {
         Type *variable_type = convertNonVoidType(node.getVariable()->getType());
         if (!variable_type) throwError("Malformed global variable type");
 
-        getModule()->getOrInsertGlobal(node.getVariable()->getIdentifier(), variable_type);
+        // NOTE: Global wraps Variable declaration wraps Variable data:
+        getModule()->getOrInsertGlobal(node.getVariable()->getVariable()->getIdentifier(), variable_type);
       }
 
       void generatePrototype(PrototypeAST &node) {
         // Convert parsed parameter types to LLVM Types:
+        std::set<string> parameter_names;
         vector<Type *> parameter_types;
         for (const PtrVariableAST &var : node.getParameters()) {
+          if (parameter_names.count(var->getVariable()->getIdentifier()) > 0) {
+            throwError("Cannot redeclare parameter");
+          } else {
+            parameter_names.insert(var->getVariable()->getIdentifier());
+          }
           Type *parameter_type = convertNonVoidType(var->getType());
           if (!parameter_type) throwError("Malformed parameter type");
           parameter_types.push_back(parameter_type);    
@@ -410,7 +424,7 @@ namespace minic_code_generator {
         // Declare LLVM Function:
         Function *function = Function::Create(function_signature, Function::ExternalLinkage, node.getIdentifier(), getModule());
         int i = 0; // Name the arguments in order to make it easier to use them inside function body:
-        for (auto &arg : function->args()) arg.setName(node.getParameters()[i++]->getIdentifier());
+        for (auto &arg : function->args()) arg.setName(node.getParameters()[i++]->getVariable()->getIdentifier());
 
         // Add PrototypeAST to known functions:
         (*Functions)[node.getIdentifier()] = &node;
@@ -427,15 +441,17 @@ namespace minic_code_generator {
         getBuilder()->SetInsertPoint(functionBodyBlock);
 
         // Initialise local variables with function parameters:
-        SymbolTable LocalVariables;
+        SymbolTable function_scope;
         for (auto &arg : function->args()) {
           AllocaInst *argument_alloca = createEntryBlockAlloca(function, arg.getType(), arg.getName());
           getBuilder()->CreateStore(&arg, argument_alloca);
-          LocalVariables[string(arg.getName())] = argument_alloca;
+          function_scope[string(arg.getName())] = argument_alloca;
         }
 
         // Generate code for the function body:
-        StatementCodeGenerator(getContext(), getModule(), getBuilder(), &LocalVariables, Functions).generateCode(*node.getBody());
+        vector<SymbolTable *> symbols;
+        symbols.push_back(&function_scope);
+        StatementCodeGenerator(getContext(), getModule(), getBuilder(), &symbols, Functions).generateCode(*node.getBody());
         // Ensure function has a return statement:
         if (!getBuilder()->GetInsertBlock()->getTerminator()) {
           if (function->getReturnType()->isVoidTy()) {

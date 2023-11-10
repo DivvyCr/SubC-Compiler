@@ -449,7 +449,7 @@ namespace minic_parser {
       getNextToken(); // Consume )
       return make_unique<FunctionCallAST>(token, ident, std::move(arguments));
     } else if (isExpressionEnd(active_token.type) || isOperator(active_token.type)) {
-      return make_unique<VariableAST>(token, ident, UNKNOWN);
+      return make_unique<VariableLoadAST>(token, ident);
     }
     return throwError("parseIdentifier: Expected variable or function call");
   }
@@ -486,7 +486,7 @@ namespace minic_parser {
       default:
         return throwError("parseVariable: Expected variable type (non-VOID).");
     }
-    return make_unique<VariableAST>(token, ident, variable_type);
+    return make_unique<VariableAST>(make_unique<VariableLoadAST>(token, ident), variable_type);
   }
 
   //
