@@ -61,25 +61,8 @@ namespace minic_printer {
         Out << CurrentPrefix << "Bool: " << std::to_string(node.getValue());
         return nullptr;
       }
-      void* visit(VariableAST &node) override {
-        Out << CurrentPrefix << "Variable: (";
-        switch (node.getType()) {
-          case INTEGER:
-            Out << "int) ";
-            break;
-          case FLOAT:
-            Out << "float) ";
-            break;
-          case BOOL:
-            Out << "bool) ";
-            break;
-          case UNKNOWN:
-            Out << "ANY) ";
-            break;
-          default:
-            break;
-        }
-        Out << node.getIdentifier();
+      void* visit(VariableLoadAST &node) override {
+        Out << CurrentPrefix << "Variable: " << node.getIdentifier();
         return nullptr;
       }
       void* visit(AssignmentAST &node) override {
@@ -102,6 +85,23 @@ namespace minic_printer {
         print(*node.getLeft());
         print(*node.getRight());
         return nullptr;
+      }
+      void visit(VariableAST &node) override {
+        Out << CurrentPrefix;
+        switch (node.getType()) {
+          case INTEGER:
+            Out << "Int: ";
+            break;
+          case FLOAT:
+            Out << "Float: ";
+            break;
+          case BOOL:
+            Out << "Bool: ";
+            break;
+          default:
+            break;
+        }
+        Out << node.getVariable()->getIdentifier();
       }
       void visit(ExpressionStatementAST &node) override {
         print(*node.getExpression(), false);
