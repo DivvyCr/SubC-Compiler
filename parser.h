@@ -31,7 +31,7 @@ namespace minic_parser {
   struct DECLARATIONS {
     vector<PtrPrototypeAST> externs;
     vector<PtrFunctionAST> functions;
-    vector<PtrGlobalVariableAST> globals;
+    vector<PtrVariableDeclarationAST> globals;
   };
 
   // PARSING:
@@ -40,8 +40,8 @@ namespace minic_parser {
   static void parseDeclaration(DECLARATIONS &declarations);
   static void parseGlobalVariableOrFunction(DECLARATIONS &declarations, int token_type);
   static void parseFunction(DECLARATIONS &declarations, TOKEN token, const string &ident, MiniCType return_type);
-  static vector<PtrVariableAST> parseParameters();
-  static PtrVariableAST parseParameter();
+  static vector<PtrVariableDeclarationAST> parseParameters();
+  static PtrVariableDeclarationAST parseParameter();
 
   // Statements:
   static vector<PtrStatementAST> parseStatements();
@@ -51,7 +51,7 @@ namespace minic_parser {
   static PtrReturnAST parseReturnStatement();
   static PtrExpressionStatementAST parseExpressionStmt();
   static PtrCodeBlockAST parseCodeBlock();
-  static vector<PtrVariableAST> parseBlockDecls();
+  static vector<PtrVariableDeclarationAST> parseBlockDecls();
 
   // Expressions:
   static PtrExpressionAST parseExpression();
@@ -60,7 +60,7 @@ namespace minic_parser {
   static PtrExpressionAST parseNegation();
   static PtrExpressionAST parseParens();
   static PtrExpressionAST parseAtomicValue();
-  static PtrVariableAST parseVariable(TOKEN token, int token_type, const string &ident);
+  static PtrVariableDeclarationAST parseVariable(TOKEN token, int token_type, const string &ident);
   static PtrExpressionAST parseIdentifier(TOKEN token, const string &ident);
   static vector<PtrExpressionAST> parseArguments();
 

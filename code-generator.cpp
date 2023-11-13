@@ -122,11 +122,7 @@ namespace minic_code_generator {
       void* visit(VariableLoadAST &node) {
         string variable_name = node.getIdentifier();
 
-        AllocaInst *variable_alloca;
-        for (int i = ScopedLocalVariables->size()-1; i >= 0; i--) {
-          variable_alloca = (*(*ScopedLocalVariables)[i])[variable_name];
-          if (variable_alloca) break;
-        }
+        AllocaInst *variable_alloca = searchScopes(variable_name);
         if (variable_alloca) {
           return getBuilder()->CreateLoad(variable_alloca->getAllocatedType(), variable_alloca, variable_name);
         }
@@ -144,13 +140,7 @@ namespace minic_code_generator {
 
         // Try to assign local variable first, to shadow any global variables:
         string assignee_name = node.getIdentifier();
-
-        AllocaInst *assignee_alloca;
-        for (int i = ScopedLocalVariables->size()-1; i >= 0; i--) {
-          assignee_alloca = (*(*ScopedLocalVariables)[i])[assignee_name];
-          if (assignee_alloca) break;
-        }
-
+        AllocaInst *assignee_alloca = searchScopes(assignee_name);
         if (assignee_alloca) return storeAssignment(assignee_alloca, expression, assignee_alloca->getAllocatedType());
         GlobalVariable *global_variable = getModule()->getNamedGlobal(assignee_name);
         if (global_variable) return storeAssignment(global_variable, expression, global_variable->getValueType());
@@ -158,8 +148,9 @@ namespace minic_code_generator {
         return throwError("Unknown variable for assignment");
       }
       void* visit(FunctionCallAST &node) {
+        fprintf(stderr, "Call\n");
         Function *called_function = getModule()->getFunction(node.getIdentifier());
-        if (!called_function) return throwError("Unknown function called");
+        if (!called_function) return throwError(node.getToken(), "Unknown function called");
 
         int num_expected_arguments = called_function->arg_size();
         int num_supplied_arguments = node.getArguments().size();
@@ -195,7 +186,7 @@ namespace minic_code_generator {
           default:
             break;
         }
-        return throwError("Unknown or inappropriate unary operator");
+        return throwError(node.getToken(), "Unknown unary operator or inappropriate operand types");
       }
       void* visit(BinaryExpressionAST &node) {
         // Initialise LHS and RHS:
@@ -230,7 +221,16 @@ namespace minic_code_generator {
           return getBuilder()->CreateCmp(comparison_instructions[{operator_type, operands_type}], left, right);
         }
 
-        return throwError("Unknown or inappropriate binary operator");
+        return throwError(node.getToken(), "Unknown binary operator or inappropriate operand types");
+      }
+
+      AllocaInst* searchScopes(string identifier) {
+        AllocaInst *found_alloca;
+        for (int i = ScopedLocalVariables->size()-1; i >= 0; i--) {
+          found_alloca = (*ScopedLocalVariables->at(i))[identifier];
+          if (found_alloca) break;
+        }
+        return found_alloca;
       }
 
       Value* storeAssignment(Value *assignee, Value *assignment, Type *assignee_type) {
@@ -288,7 +288,7 @@ namespace minic_code_generator {
         const_cast<StatementAST &>(node).dispatch(*this);
       }
 
-      void visit(VariableAST &node) {
+      void visit(VariableDeclarationAST &node) {
         string variable_name = node.getVariable()->getIdentifier();
         Type *variable_type = convertNonVoidType(node.getType());
         AllocaInst *variable_alloca = (*ScopedLocalVariables->back())[variable_name];
@@ -307,7 +307,7 @@ namespace minic_code_generator {
       void visit(CodeBlockAST &node) {
         SymbolTable new_scope;
         ScopedLocalVariables->push_back(&new_scope);
-        for (const PtrVariableAST &var : node.getDeclarations()) generateCode(*var);
+        for (const PtrVariableDeclarationAST &var : node.getDeclarations()) generateCode(*var);
         for (const PtrStatementAST &stmt : node.getStatements()) generateCode(*stmt);
         ScopedLocalVariables->pop_back();
       }
@@ -386,19 +386,18 @@ namespace minic_code_generator {
         : BaseCodeGenerator(llvmContext, llvmModule, &MiniCBuilder),
         Functions(functions), MiniCBuilder(*llvmContext) {}
 
-      void generateGlobal(GlobalVariableAST &node) {
-        Type *variable_type = convertNonVoidType(node.getVariable()->getType());
+      void generateGlobal(VariableDeclarationAST &node) {
+        Type *variable_type = convertNonVoidType(node.getType());
         if (!variable_type) throwError("Malformed global variable type");
 
-        // NOTE: Global wraps Variable declaration wraps Variable data:
-        getModule()->getOrInsertGlobal(node.getVariable()->getVariable()->getIdentifier(), variable_type);
+        getModule()->getOrInsertGlobal(node.getVariable()->getIdentifier(), variable_type);
       }
 
       void generatePrototype(PrototypeAST &node) {
         // Convert parsed parameter types to LLVM Types:
         std::set<string> parameter_names;
         vector<Type *> parameter_types;
-        for (const PtrVariableAST &var : node.getParameters()) {
+        for (const PtrVariableDeclarationAST &var : node.getParameters()) {
           if (parameter_names.count(var->getVariable()->getIdentifier()) > 0) {
             throwError("Cannot redeclare parameter");
           } else {
@@ -465,7 +464,7 @@ namespace minic_code_generator {
       }
 
       void generateProgram(const ProgramAST &node) {
-        for (const PtrGlobalVariableAST &g : node.getGlobals()) generateGlobal(*g);
+        for (const PtrVariableDeclarationAST &g : node.getGlobals()) generateGlobal(*g);
         for (const PtrPrototypeAST &e : node.getExterns()) generatePrototype(*e);
         for (const PtrFunctionAST &f : node.getFunctions()) generateFunction(*f);
         getModule()->print(outs(), nullptr);
@@ -483,6 +482,12 @@ namespace minic_code_generator {
   std::nullptr_t throwError(const char* msg) {
     // TODO: Use tokens from AST nodes to pin-point line and column of error.
     fprintf(stderr, "Error: %s\n", msg);
+    exit(1);
+    return nullptr;
+  }
+
+  std::nullptr_t throwError(TOKEN t, const char *msg) {
+    fprintf(stderr, "Error: %s [%d:%d]\n", msg, t.line_num, t.column_num);
     exit(1);
     return nullptr;
   }
