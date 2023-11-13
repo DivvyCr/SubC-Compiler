@@ -17,7 +17,7 @@ namespace minic_printer {
       Printer(std::ostream &out) : Out(out) {}
 
       void print(const ProgramAST &node) {
-        for (const PtrGlobalVariableAST &g : node.getGlobals()) print(*g);
+        for (const PtrVariableDeclarationAST &g : node.getGlobals()) print(*g);
         for (const PtrPrototypeAST &e : node.getExterns()) print(*e);
         for (const PtrFunctionAST &f : node.getFunctions()) print(*f);
       }
@@ -86,7 +86,7 @@ namespace minic_printer {
         print(*node.getRight());
         return nullptr;
       }
-      void visit(VariableAST &node) override {
+      void visit(VariableDeclarationAST &node) override {
         Out << CurrentPrefix;
         switch (node.getType()) {
           case INTEGER:
@@ -108,7 +108,7 @@ namespace minic_printer {
       }
       void visit(CodeBlockAST &node) override {
         Out << CurrentPrefix << "Block:";
-        for (const PtrVariableAST &decl : node.getDeclarations()) print(*decl);
+        for (const PtrVariableDeclarationAST &decl : node.getDeclarations()) print(*decl);
         for (const PtrStatementAST &stmt : node.getStatements()) print(*stmt);
       }
       void visit(IfBlockAST &node) override {
@@ -133,13 +133,9 @@ namespace minic_printer {
       }
 
       // Non-visitor:
-      void print(const GlobalVariableAST &node) {
-        Out << "\nGlobal ";
-        print(*node.getVariable(), false);
-      }
       void print(const PrototypeAST &node) {
         Out << "\n" << CurrentPrefix << "Prototype: " << node.getIdentifier();
-        for (const PtrVariableAST &param : node.getParameters()) print(*param);
+        for (const PtrVariableDeclarationAST &param : node.getParameters()) print(*param);
       }
       void print(const FunctionAST &node) {
         Out << "\n" << CurrentPrefix << "Function:";

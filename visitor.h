@@ -22,7 +22,7 @@ class ExpressionVisitor {
     virtual void* visit(BinaryExpressionAST &node) = 0;
 };
 
-class VariableAST;
+class VariableDeclarationAST;
 class ExpressionStatementAST;
 class CodeBlockAST;
 class IfBlockAST;
@@ -31,7 +31,7 @@ class ReturnAST;
 
 class StatementVisitor {
   public:
-    virtual void visit(VariableAST &node) = 0;
+    virtual void visit(VariableDeclarationAST &node) = 0;
     virtual void visit(ExpressionStatementAST &node) = 0;
     virtual void visit(CodeBlockAST &node) = 0;
     virtual void visit(IfBlockAST &node) = 0;

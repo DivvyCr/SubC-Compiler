@@ -9,7 +9,7 @@ namespace minic_parser {
     getNextToken(); // Consume first token (always INVALID).
 
     DECLARATIONS declarations;
-    vector<PtrGlobalVariableAST> globals;
+    vector<PtrVariableDeclarationAST> globals;
     vector<PtrPrototypeAST> externs;
     vector<PtrFunctionAST> functions;
     declarations.globals = std::move(globals);
@@ -52,7 +52,7 @@ namespace minic_parser {
     }
     getNextToken();
 
-    vector<PtrVariableAST> parameters = parseParameters();
+    vector<PtrVariableDeclarationAST> parameters = parseParameters();
 
     if (active_token.type != RPAR) {
       throwError("parseExtern: Expected ')'");
@@ -99,8 +99,7 @@ namespace minic_parser {
 
     if (active_token.type == SC) {
       getNextToken(); // Consume ;
-      PtrVariableAST variable = parseVariable(token, token_type, identifier);
-      PtrGlobalVariableAST global = std::make_unique<GlobalVariableAST>(std::move(variable));
+      PtrVariableDeclarationAST global = parseVariable(token, token_type, identifier);
       decls.globals.push_back(std::move(global));
       return;
     } else if (active_token.type == LPAR) {
@@ -112,7 +111,7 @@ namespace minic_parser {
 
   static void parseFunction(DECLARATIONS &decls, TOKEN token, const string &identifier, MiniCType return_type) {
     getNextToken(); // Consume (
-    vector<PtrVariableAST> parameters = parseParameters();
+    vector<PtrVariableDeclarationAST> parameters = parseParameters();
     if (active_token.type != RPAR) {
       throwError("parseFunction: Expected ')'");
     }
@@ -124,11 +123,11 @@ namespace minic_parser {
     decls.functions.push_back(std::move(function));
   }
 
-  static vector<PtrVariableAST> parseParameters() {
-    vector<PtrVariableAST> parameters;
+  static vector<PtrVariableDeclarationAST> parseParameters() {
+    vector<PtrVariableDeclarationAST> parameters;
 
     if (isVarType(active_token.type)) {
-      PtrVariableAST first_parameter = parseParameter();
+      PtrVariableDeclarationAST first_parameter = parseParameter();
       if (!first_parameter) {
         throwError("parseParameters: Error parsing parameter");
         return parameters;
@@ -137,7 +136,7 @@ namespace minic_parser {
 
       while (active_token.type == COMMA) {
         getNextToken(); // Consume COMMA
-        PtrVariableAST next_parameter = parseParameter();
+        PtrVariableDeclarationAST next_parameter = parseParameter();
         if (!next_parameter) {
           throwError("parseParameters: Error parsing parameters");
           return parameters;
@@ -151,7 +150,7 @@ namespace minic_parser {
     return parameters;
   }
 
-  static PtrVariableAST parseParameter() {
+  static PtrVariableDeclarationAST parseParameter() {
     if (!isVarType(active_token.type)) {
       return throwError("parseParameter: Expected TYPE");
     }
@@ -247,7 +246,7 @@ namespace minic_parser {
   static PtrCodeBlockAST parseCodeBlock() {
     TOKEN token = active_token;
     getNextToken(); // Consume {
-    vector<PtrVariableAST> declarations = parseBlockDecls();
+    vector<PtrVariableDeclarationAST> declarations = parseBlockDecls();
     vector<PtrStatementAST> statements = parseStatements();
     if (active_token.type != RBRA) {
       return throwError("parseCodeBlock: Expected '}'");
@@ -257,8 +256,8 @@ namespace minic_parser {
     return make_unique<CodeBlockAST>(token, std::move(declarations), std::move(statements));
   }
 
-  static vector<PtrVariableAST> parseBlockDecls() {
-    vector<PtrVariableAST> declarations;
+  static vector<PtrVariableDeclarationAST> parseBlockDecls() {
+    vector<PtrVariableDeclarationAST> declarations;
 
     while (isVarType(active_token.type)) {
       int token_type = active_token.type;
@@ -276,7 +275,7 @@ namespace minic_parser {
         return declarations;
       }
       getNextToken(); // Consume ;
-      PtrVariableAST decl = parseVariable(token, token_type, identifier);
+      PtrVariableDeclarationAST decl = parseVariable(token, token_type, identifier);
       declarations.push_back(std::move(decl));
     }
 
@@ -286,7 +285,7 @@ namespace minic_parser {
     }
 
     throwError("parseBlockDecls: Expected a variable declaration or a statement.");
-    return vector<PtrVariableAST>();
+    return vector<PtrVariableDeclarationAST>();
   }
 
   static vector<PtrStatementAST> parseStatements() {
@@ -471,7 +470,7 @@ namespace minic_parser {
     return arguments;
   }
 
-  static PtrVariableAST parseVariable(TOKEN token, int token_type, const string &ident) {
+  static PtrVariableDeclarationAST parseVariable(TOKEN token, int token_type, const string &ident) {
     MiniCType variable_type;
     switch (token_type) {
       case INT_TOK:
@@ -486,7 +485,7 @@ namespace minic_parser {
       default:
         return throwError("parseVariable: Expected variable type (non-VOID).");
     }
-    return make_unique<VariableAST>(make_unique<VariableLoadAST>(token, ident), variable_type);
+    return make_unique<VariableDeclarationAST>(make_unique<VariableLoadAST>(token, ident), variable_type);
   }
 
   //
