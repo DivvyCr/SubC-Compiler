@@ -86,57 +86,58 @@ class BaseAST {
 };
 
 // This class represents code constructs that hold some value.
-class ExpressionAST { 
+class ExpressionAST : public BaseAST { 
   public:
+    ExpressionAST(TOKEN token) : BaseAST(token) {}
     virtual ~ExpressionAST() {}
     virtual void *dispatch(ExpressionVisitor &v) = 0;
 };
 
-class IntAST : public BaseAST, public ExpressionAST {
+class IntAST : public ExpressionAST {
   public:
     IntAST(TOKEN token, int value)
-      : BaseAST(token), Value(value) {}
+      : ExpressionAST(token), Value(value) {}
     void *dispatch(ExpressionVisitor &visitor) override { return visitor.visit(*this); }
     const int getValue() const { return Value; }
   private:
     int Value;
 };
 
-class FloatAST : public BaseAST, public ExpressionAST {
+class FloatAST : public ExpressionAST {
   public:
     FloatAST(TOKEN token, float value)
-      : BaseAST(token), Value(value) {}
+      : ExpressionAST(token), Value(value) {}
     void *dispatch(ExpressionVisitor &visitor) override { return visitor.visit(*this); }
     const float getValue() const { return Value; }
   private:
     float Value;
 };
 
-class BoolAST : public BaseAST, public ExpressionAST {
+class BoolAST : public ExpressionAST {
   public:
     BoolAST(TOKEN token, bool value)
-      : BaseAST(token), Value(value) {}
+      : ExpressionAST(token), Value(value) {}
     void *dispatch(ExpressionVisitor &visitor) override { return visitor.visit(*this); }
     const bool getValue() const { return Value; }
   private:
     bool Value;
 };
 
-class VariableLoadAST : public BaseAST, public ExpressionAST {
+class VariableLoadAST : public ExpressionAST {
   public:
     VariableLoadAST(TOKEN token, const string &ident)
-      : BaseAST(token), Identifier(ident) {}
+      : ExpressionAST(token), Identifier(ident) {}
     void *dispatch(ExpressionVisitor &visitor) override { return visitor.visit(*this); }
     const string getIdentifier() const { return Identifier; }
   private:
     string Identifier;
 };
 
-class AssignmentAST : public BaseAST, public ExpressionAST {
+class AssignmentAST : public ExpressionAST {
   public:
     AssignmentAST(TOKEN token, const string &ident,
         PtrExpressionAST assignment)
-      : BaseAST(token), Identifier(ident),
+      : ExpressionAST(token), Identifier(ident),
       Assignment(std::move(assignment)) {}
     void *dispatch(ExpressionVisitor &visitor) override { return visitor.visit(*this); }
     const string getIdentifier() const { return Identifier; }
@@ -146,11 +147,11 @@ class AssignmentAST : public BaseAST, public ExpressionAST {
     PtrExpressionAST Assignment;
 };
 
-class FunctionCallAST : public BaseAST, public ExpressionAST {
+class FunctionCallAST : public ExpressionAST {
   public:
     FunctionCallAST(TOKEN token, const string &ident,
         vector<PtrExpressionAST> arguments)
-      : BaseAST(token), Identifier(ident),
+      : ExpressionAST(token), Identifier(ident),
       Arguments(std::make_move_iterator(arguments.begin()),
       std::make_move_iterator(arguments.end())) {}
     void *dispatch(ExpressionVisitor &visitor) override { return visitor.visit(*this); }
@@ -161,10 +162,10 @@ class FunctionCallAST : public BaseAST, public ExpressionAST {
     vector<PtrExpressionAST> Arguments;
 };
 
-class UnaryExpressionAST : public BaseAST, public ExpressionAST {
+class UnaryExpressionAST : public ExpressionAST {
   public:
     UnaryExpressionAST(TOKEN op, PtrExpressionAST expression)
-        : BaseAST(op), Expression(std::move(expression)) {}
+        : ExpressionAST(op), Expression(std::move(expression)) {}
     void *dispatch(ExpressionVisitor &visitor) override { return visitor.visit(*this); }
     TOKEN getOperator() { return getToken(); }
     PtrExpressionAST &getExpression() { return Expression; }
@@ -172,12 +173,12 @@ class UnaryExpressionAST : public BaseAST, public ExpressionAST {
     PtrExpressionAST Expression;
 };
 
-class BinaryExpressionAST : public BaseAST, public ExpressionAST {
+class BinaryExpressionAST : public ExpressionAST {
   public:
     BinaryExpressionAST(TOKEN op,
         PtrExpressionAST left_expression,
         PtrExpressionAST right_expression)
-      : BaseAST(op), Left(std::move(left_expression)), Right(std::move(right_expression)) {}
+      : ExpressionAST(op), Left(std::move(left_expression)), Right(std::move(right_expression)) {}
     void *dispatch(ExpressionVisitor &visitor) override { return visitor.visit(*this); }
     TOKEN getOperator() { return getToken(); }
     const PtrExpressionAST &getLeft() const { return Left; }

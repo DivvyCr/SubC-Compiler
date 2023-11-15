@@ -72,8 +72,6 @@ namespace minic_code_generator {
     FunctionTable *Functions;
 
     std::map<std::pair<int, MiniCType>, Instruction::BinaryOps> arithmetic_instructions = {
-      {{AND, INTEGER}, Instruction::BinaryOps::And},
-      {{OR, INTEGER}, Instruction::BinaryOps::Or},
       {{PLUS, INTEGER}, Instruction::BinaryOps::Add},
       {{MINUS, INTEGER}, Instruction::BinaryOps::Sub},
       {{MULT, INTEGER}, Instruction::BinaryOps::Mul},
@@ -189,30 +187,59 @@ namespace minic_code_generator {
         return throwError(node.getToken(), "Unknown unary operator or inappropriate operand types");
       }
       void* visit(BinaryExpressionAST &node) {
-        // Initialise LHS and RHS:
+        int operator_type = node.getOperator().type;
+
+        // Lazily handle AND and OR:
+        if (isLogicOp(operator_type)) {
+          // In-order traversal of the binary expression,
+          // flattening the boolean clauses into `logic_subexprs` and `logic_operators`,
+          // which are used for easier lazy evaluation:
+
+          logic_expr_depth++;
+
+          if (isLogicOp(node.getLeft()->getToken().type)) {
+            generateCode(*node.getLeft());
+          } else {
+            logic_subexprs.push_back(&node.getLeft());
+          }
+
+          logic_operators.push_back(node.getOperator());
+
+          if (isLogicOp(node.getRight()->getToken().type)) {
+            generateCode(*node.getRight());
+          } else {
+            logic_subexprs.push_back(&node.getRight());
+          }
+
+          logic_expr_depth--;
+
+          // Generate the full boolean expression:
+          if (logic_expr_depth < 1) return generateLazyBooleanExpression();
+          return nullptr; // This is only returned from the two generateCode(..) calls above.
+        }
+
+        // Initialise LHS and RHS for non-lazy evaluation:
         Value *left = generateCode(*node.getLeft());
         Type *left_type = left->getType();
         Value *right = generateCode(*node.getRight());
         Type *right_type = right->getType();
 
         // Type-check:
-        int operator_type = node.getOperator().type;
-        MiniCType operands_type = INTEGER;
+        MiniCType operands_type;
         if (left_type->isFloatTy() || right_type->isFloatTy()) {
           convertToFloatIfInt(&left, left_type);
           convertToFloatIfInt(&right, right_type);
           operands_type = FLOAT;
         } else if (left_type->isIntegerTy(1) && right_type->isIntegerTy(1)) {
           operands_type = BOOL;
-        }
-        if (left->getType() != right->getType()) {
-          return throwError("Mismatched expression types (for arithmetic operation)"); 
+        } else if (left_type->isIntegerTy(32) && right_type->isIntegerTy(32)) {
+          operands_type = INTEGER;
+        } else {
+          return throwError(node.getToken(), ("Inappropriate operand types for " + node.getOperator().lexeme + " operator").c_str()); 
         }
 
         // Generate appropriate instruction:
-        if ((isArithmeticOp(operator_type) && (operands_type == INTEGER || operands_type == FLOAT)) ||
-            (isLogicOp(operator_type) && operands_type == BOOL)) {
-          if (operands_type == BOOL) operands_type = INTEGER; // Necessary to match with instructions map
+        if (isArithmeticOp(operator_type) && (operands_type == INTEGER || operands_type == FLOAT)) {
           return getBuilder()->CreateBinOp(arithmetic_instructions[{operator_type, operands_type}], left, right);
         }
         if ((isComparisonOp(operator_type) && (operands_type == INTEGER || operands_type == FLOAT)) ||
@@ -222,6 +249,100 @@ namespace minic_code_generator {
         }
 
         return throwError(node.getToken(), "Unknown binary operator or inappropriate operand types");
+      }
+
+      int logic_expr_depth = 0;
+      vector<const PtrExpressionAST *> logic_subexprs;
+      vector<TOKEN> logic_operators;
+
+      PHINode* generateLazyBooleanExpression() {
+        BasicBlock *entry_block = getBuilder()->GetInsertBlock();
+        Function *parent_function = entry_block->getParent();
+  
+        // NOTE: Boolean expressions in C are in Disjunctive Normal Form.
+        // That is, clauses consist of &&, and they are separated by ||.
+
+        // If expression contains at least one || operator,
+        // there are multiple clauses that will be merged via a PHINode in 'lor_merge_block':
+        BasicBlock *lor_merge_block = nullptr;
+        PHINode *lor_phi;
+        for (TOKEN &t : logic_operators) {
+          if (t.type == OR) {
+            lor_merge_block = BasicBlock::Create(*getContext(), "lor.end", parent_function);
+            getBuilder()->SetInsertPoint(lor_merge_block);
+            lor_phi = getBuilder()->CreatePHI(getBoolType(), 0);
+            break;
+          }
+        }
+
+        int idx = logic_operators.size()-1;
+        BasicBlock *next_clause;
+
+        BasicBlock *land_merge_block = nullptr;
+        PHINode *land_phi;
+        if (logic_operators.back().type == AND) {
+          land_merge_block = BasicBlock::Create(*getContext(), "land.end", parent_function);
+          next_clause = land_merge_block;
+          getBuilder()->SetInsertPoint(land_merge_block);
+          land_phi = getBuilder()->CreatePHI(getBoolType(), 0);
+          if (lor_merge_block) getBuilder()->CreateBr(lor_merge_block);
+
+          generateLogicRHS(parent_function, land_merge_block, land_phi, idx);
+          if (lor_merge_block) lor_phi->addIncoming(land_phi, land_merge_block);
+        } else if (logic_operators.back().type == OR) {
+          generateLogicRHS(parent_function, lor_merge_block, lor_phi, idx);
+        } else { // Theoretically unreachable due to parser:
+          throwError("Non-boolean operator in boolean expression");
+        }
+
+        TOKEN cur_operator;
+        Value *cur_operand;
+        BasicBlock *lhs_block;
+        BasicBlock *rhs_block;
+        while (idx >= 0) {
+          cur_operator = logic_operators[idx];
+          cur_operand = generateLogicLHS(parent_function, &rhs_block, &lhs_block, entry_block, idx);
+          if (cur_operator.type == OR) {
+            next_clause = rhs_block;
+            getBuilder()->CreateCondBr(cur_operand, lor_merge_block, rhs_block);
+            lor_phi->addIncoming(getBuilder()->getTrue(), lhs_block);
+          } else if (cur_operator.type == AND) {
+            getBuilder()->CreateCondBr(cur_operand, rhs_block, next_clause);
+            if (land_merge_block && (idx != 0 || next_clause == land_merge_block)) {
+              land_phi->addIncoming(getBuilder()->getFalse(), lhs_block);
+            }
+          }
+          idx--;
+        }
+
+        if (lor_merge_block) {
+          getBuilder()->SetInsertPoint(lor_merge_block);
+          return lor_phi;
+        } else if (land_merge_block) {
+          getBuilder()->SetInsertPoint(land_merge_block);
+          return land_phi;
+        }
+        return nullptr;
+      }
+
+      void generateLogicRHS(Function *parent_function, BasicBlock *merge_block, PHINode *phi, int idx) {
+        // This is for the right-most operand only!
+        BasicBlock *rhs_block = BasicBlock::Create(*getContext(), "logic.rhs", parent_function);
+        getBuilder()->SetInsertPoint(rhs_block);
+        Value *last_operand = generateCode(**logic_subexprs[idx+1]);
+        if (!last_operand->getType()->isIntegerTy(1)) throwError("Non-boolean operand in boolean expression");
+        getBuilder()->CreateBr(merge_block);
+        phi->addIncoming(last_operand, rhs_block);
+      }
+
+      Value* generateLogicLHS(Function *parent_function, BasicBlock **rhs_block, BasicBlock **lhs_block, BasicBlock *entry_block, int idx) {
+        // This is for the generic logic operand, as part of lazy generation.
+        *rhs_block = getBuilder()->GetInsertBlock();
+        *lhs_block = (idx == 0) ? entry_block : BasicBlock::Create(*getContext(), "logic.lhs", parent_function);
+        getBuilder()->SetInsertPoint(*lhs_block);
+        Value *cur_operand = generateCode(**logic_subexprs[idx]);
+        if (!cur_operand->getType()->isIntegerTy(1)) throwError("Non-boolean operand in boolean expression");
+        return cur_operand;
       }
 
       AllocaInst* searchScopes(string identifier) {
@@ -250,7 +371,7 @@ namespace minic_code_generator {
 
         return throwError("Mismatched types on assignment");
       }
-
+ 
       void convertToFloatIfInt(Value **value, Type *value_type) {
         if (value_type->isIntegerTy(32)) {
           *value = getBuilder()->CreateSIToFP(*value, getFloatType(), "conv");
@@ -269,8 +390,7 @@ namespace minic_code_generator {
             operator_type == GE || operator_type == GT);
       }
       bool isLogicOp(int operator_type) {
-        return (operator_type == AND || operator_type == OR ||
-            operator_type == NOT);
+        return (operator_type == AND || operator_type == OR);
       }
   };
 
