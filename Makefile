@@ -27,8 +27,8 @@ mccomp: mccomp.cpp lexer.cpp parser.cpp printer.cpp code-generator.cpp $(DEPS)
 	$(CXX) mccomp.cpp lexer.cpp parser.cpp printer.cpp code-generator.cpp $(CFLAGS) -o mccomp
 
 minic: mccomp.o parser.o lexer.o printer.o code-generator.o
-	$(CXX) mccomp.o parser.o lexer.o printer.o code-generator.o $(CFLAGS) -o out
+	$(CXX) mccomp.o parser.o lexer.o printer.o code-generator.o $(CFLAGS) -o mccomp
 
 clean:
-	rm -rf mccomp out
+	rm -rf mccomp
 	rm -rf mccomp.o parser.o lexer.o abstract-syntax.o code-generator.o printer.o
