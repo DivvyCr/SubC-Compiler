@@ -3,12 +3,12 @@
 
 CXX=clang++ -std=c++17
 
-CFLAGS= -g `llvm-config-17 --cppflags --ldflags --system-libs --libs all`
+CFLAGS= -g -O3 `llvm-config-17 --cppflags --ldflags --system-libs --libs all` \
+				-Wno-unused-function -Wno-unknown-warning-option -fno-rtti
 
-# NOTE: Use -O3 preferably:
-OFLAGS= -g -O0 `llvm-config-17 --cppflags`
+OFLAGS= -g -O3 `llvm-config-17 --cppflags`
 
-DEPS = abstract-syntax.h lexer.h parser.h
+DEPS = abstract-syntax.h lexer.h parser.h visitor.h
 
 # NOTE: compile into (unlinked) object code first, in order to 
 # only recompile changed files (existing links are preserved).
@@ -22,8 +22,13 @@ DEPS = abstract-syntax.h lexer.h parser.h
 #     COMMAND1
 #     COMMAND2
 #     ...
-minic: minic.o parser.o lexer.o printer.o code-generator.o
-	$(CXX) minic.o parser.o lexer.o printer.o code-generator.o $(CFLAGS) -o out
+
+mccomp: mccomp.cpp lexer.cpp parser.cpp printer.cpp code-generator.cpp $(DEPS)
+	$(CXX) mccomp.cpp lexer.cpp parser.cpp printer.cpp code-generator.cpp $(CFLAGS) -o mccomp
+
+minic: mccomp.o parser.o lexer.o printer.o code-generator.o
+	$(CXX) mccomp.o parser.o lexer.o printer.o code-generator.o $(CFLAGS) -o out
 
 clean:
-	rm -rf minic.o parser.o lexer.o abstract-syntax.o code-generator.o printer.o out
+	rm -rf mccomp out
+	rm -rf mccomp.o parser.o lexer.o abstract-syntax.o code-generator.o printer.o

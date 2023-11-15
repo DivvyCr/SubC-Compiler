@@ -188,8 +188,9 @@ class BinaryExpressionAST : public ExpressionAST {
 };
 
 // This class represents code constructs that serve to structure.
-class StatementAST {
+class StatementAST : public BaseAST {
   public:
+    StatementAST(TOKEN token) : BaseAST(token) {}
     virtual ~StatementAST() {}
     virtual void dispatch(StatementVisitor &v) = 0;
 };
@@ -197,7 +198,7 @@ class StatementAST {
 class VariableDeclarationAST : public StatementAST {
   public:
     VariableDeclarationAST(PtrVariableLoadAST variable, MiniCType declared_type)
-      : Variable(std::move(variable)), Type(declared_type) {}
+      : StatementAST(variable->getToken()), Variable(std::move(variable)), Type(declared_type) {}
     void dispatch(StatementVisitor &visitor) override { return visitor.visit(*this); }
     const PtrVariableLoadAST &getVariable() const { return Variable; }
     MiniCType getType() { return Type; }
@@ -209,19 +210,19 @@ class VariableDeclarationAST : public StatementAST {
 class ExpressionStatementAST : public StatementAST {
   public:
     ExpressionStatementAST(PtrExpressionAST expression)
-      : Expression(std::move(expression)) {}
+      : StatementAST(expression->getToken()), Expression(std::move(expression)) {}
     void dispatch(StatementVisitor &visitor) override { return visitor.visit(*this); }
     const PtrExpressionAST &getExpression() const { return Expression; }
   private:
     PtrExpressionAST Expression;
 };
 
-class CodeBlockAST : public BaseAST, public StatementAST {
+class CodeBlockAST : public StatementAST {
   public:
     CodeBlockAST(TOKEN token, 
         vector<PtrVariableDeclarationAST> declarations,
         vector<PtrStatementAST> statements)
-      : BaseAST(token),
+      : StatementAST(token),
       Declarations(std::make_move_iterator(declarations.begin()),
           std::make_move_iterator(declarations.end())),
       Statements(std::make_move_iterator(statements.begin()),
@@ -234,18 +235,18 @@ class CodeBlockAST : public BaseAST, public StatementAST {
     vector<PtrStatementAST> Statements;
 };
 
-class IfBlockAST : public BaseAST, public StatementAST {
+class IfBlockAST : public StatementAST {
   public:
     IfBlockAST(TOKEN token,
         PtrExpressionAST condition,
         PtrCodeBlockAST true_branch)
-      : BaseAST(token), Condition(std::move(condition)),
+      : StatementAST(token), Condition(std::move(condition)),
       TrueBranch(std::move(true_branch)) {}
     IfBlockAST(TOKEN token,
         PtrExpressionAST condition,
         PtrCodeBlockAST true_branch,
         PtrCodeBlockAST false_branch)
-      : BaseAST(token), Condition(std::move(condition)),
+      : StatementAST(token), Condition(std::move(condition)),
       TrueBranch(std::move(true_branch)),
       FalseBranch(std::move(false_branch)) {}
     void dispatch(StatementVisitor &visitor) override { return visitor.visit(*this); }
@@ -257,11 +258,11 @@ class IfBlockAST : public BaseAST, public StatementAST {
     PtrCodeBlockAST TrueBranch, FalseBranch;
 };
 
-class WhileBlockAST : public BaseAST, public StatementAST {
+class WhileBlockAST : public StatementAST {
   public:
     WhileBlockAST(TOKEN token,
         PtrExpressionAST condition, PtrStatementAST body)
-      : BaseAST(token), Condition(std::move(condition)), Body(std::move(body)) {}
+      : StatementAST(token), Condition(std::move(condition)), Body(std::move(body)) {}
     void dispatch(StatementVisitor &visitor) override { return visitor.visit(*this); }
     const PtrExpressionAST &getCondition() const { return Condition; }
     const PtrStatementAST &getBody() const { return Body; }
@@ -270,12 +271,12 @@ class WhileBlockAST : public BaseAST, public StatementAST {
     PtrStatementAST Body;
 };
 
-class ReturnAST : public BaseAST, public StatementAST {
+class ReturnAST : public StatementAST {
   public:
     ReturnAST(TOKEN token)
-      : BaseAST(token) {}
+      : StatementAST(token) {}
     ReturnAST(TOKEN token, PtrExpressionAST body)
-      : BaseAST(token), Body(std::move(body)) {}
+      : StatementAST(token), Body(std::move(body)) {}
     void dispatch(StatementVisitor &visitor) override { return visitor.visit(*this); }
     const PtrExpressionAST &getBody() const { return Body; }
   private:
