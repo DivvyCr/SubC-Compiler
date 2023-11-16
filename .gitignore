@@ -1,4 +1,5 @@
 tests/
+more-tests/
 mccomp
 executable
 output.ll
