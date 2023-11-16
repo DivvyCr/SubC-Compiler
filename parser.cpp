@@ -19,7 +19,7 @@ namespace minic_parser {
     while (isExtern(active_token.type)) parseExtern(declarations);
     while (isAnyType(active_token.type)) parseDeclaration(declarations);
 
-    return make_unique<ProgramAST>(
+    return std::make_unique<ProgramAST>(
         std::move(declarations.globals),
         std::move(declarations.externs),
         std::move(declarations.functions));
@@ -67,7 +67,7 @@ namespace minic_parser {
     }
     getNextToken();
 
-    PtrPrototypeAST ext = make_unique<PrototypeAST>(token, identifier, return_type, std::move(parameters));
+    PtrPrototypeAST ext = std::make_unique<PrototypeAST>(token, identifier, return_type, std::move(parameters));
     decls.externs.push_back(std::move(ext));
   }
 
@@ -118,8 +118,8 @@ namespace minic_parser {
     getNextToken(); // Consume )
     PtrCodeBlockAST body = parseCodeBlock();
 
-    PtrPrototypeAST prototype = make_unique<PrototypeAST>(token, identifier, return_type, std::move(parameters));
-    PtrFunctionAST function = make_unique<FunctionAST>(token, std::move(prototype), std::move(body));
+    PtrPrototypeAST prototype = std::make_unique<PrototypeAST>(token, identifier, return_type, std::move(parameters));
+    PtrFunctionAST function = std::make_unique<FunctionAST>(token, std::move(prototype), std::move(body));
     decls.functions.push_back(std::move(function));
   }
 
@@ -196,10 +196,10 @@ namespace minic_parser {
         return throwError("parseElseBlock: Expected '{'");
       }
       PtrCodeBlockAST false_branch = parseCodeBlock();
-      return make_unique<IfBlockAST>(token, std::move(condition), std::move(true_branch), std::move(false_branch));
+      return std::make_unique<IfBlockAST>(token, std::move(condition), std::move(true_branch), std::move(false_branch));
     }
 
-    return make_unique<IfBlockAST>(token, std::move(condition), std::move(true_branch));
+    return std::make_unique<IfBlockAST>(token, std::move(condition), std::move(true_branch));
   }
 
   static PtrWhileBlockAST parseWhileBlock() {
@@ -224,21 +224,21 @@ namespace minic_parser {
       return throwError("parseWhileBlock: Expected STMT");
     }
     PtrStatementAST body = parseStatement();
-    return make_unique<WhileBlockAST>(token, std::move(condition), std::move(body));
+    return std::make_unique<WhileBlockAST>(token, std::move(condition), std::move(body));
   }
 
   static PtrReturnAST parseReturnStatement() {
     TOKEN token = active_token;
     getNextToken(); // consume RETURN
     if (active_token.type == SC) {
-      return make_unique<ReturnAST>(token);
+      return std::make_unique<ReturnAST>(token);
     } else if (isExpression(active_token.type)) {
       PtrExpressionAST body = parseExpression();
       if (active_token.type != SC) {
         return throwError("parseReturnStatement: Expected ';'");
       }
       getNextToken(); // Consume ;
-      return make_unique<ReturnAST>(token, std::move(body));
+      return std::make_unique<ReturnAST>(token, std::move(body));
     }
     return throwError("parseReturnStatement: Expected ';' or an expression");
   }
@@ -253,7 +253,7 @@ namespace minic_parser {
     }
     getNextToken(); // Consume }
 
-    return make_unique<CodeBlockAST>(token, std::move(declarations), std::move(statements));
+    return std::make_unique<CodeBlockAST>(token, std::move(declarations), std::move(statements));
   }
 
   static vector<PtrVariableDeclarationAST> parseBlockDecls() {
@@ -326,7 +326,7 @@ namespace minic_parser {
         return throwError("parseExpressionStmt: Expected ';'");
       }
       getNextToken(); // Consume ;
-      return make_unique<ExpressionStatementAST>(std::move(e));
+      return std::make_unique<ExpressionStatementAST>(std::move(e));
     }
     return throwError("parseExpressionStmt: Expected an expression ending in ';'");
   }
@@ -355,7 +355,7 @@ namespace minic_parser {
     if (active_token.type == ASSIGN) {
       getNextToken(); // Consume =
       PtrExpressionAST assignment = parseExpression();
-      return make_unique<AssignmentAST>(token, ident, std::move(assignment));
+      return std::make_unique<AssignmentAST>(token, ident, std::move(assignment));
     } else if (isExpressionEnd(active_token.type) ||
         isOperator(active_token.type) || active_token.type == LPAR) {
       PtrExpressionAST first_operand = parseIdentifier(token, ident);
@@ -382,7 +382,7 @@ namespace minic_parser {
         rhs = parseExpressionOp(token_prec + 1, std::move(rhs));
       }
 
-      lhs = make_unique<BinaryExpressionAST>(op, std::move(lhs), std::move(rhs));
+      lhs = std::make_unique<BinaryExpressionAST>(op, std::move(lhs), std::move(rhs));
     }
     return lhs;
   }
@@ -392,7 +392,7 @@ namespace minic_parser {
     if (op.type == MINUS || op.type == NOT) {
       getNextToken(); // Consume OPERATOR
       PtrExpressionAST operand = parseNegation();
-      return make_unique<UnaryExpressionAST>(op, std::move(operand));
+      return std::make_unique<UnaryExpressionAST>(op, std::move(operand));
     } else if (isLiteral(op.type) ||
         op.type == IDENT ||
         op.type == LPAR) {
@@ -426,11 +426,11 @@ namespace minic_parser {
       getNextToken(); // Consume VALUE
       switch (token.type) {
         case INT_LIT:
-          return make_unique<IntAST>(token, lexer_data.int_val);
+          return std::make_unique<IntAST>(token, lexer_data.int_val);
         case FLOAT_LIT:
-          return make_unique<FloatAST>(token, lexer_data.float_val);
+          return std::make_unique<FloatAST>(token, lexer_data.float_val);
         case BOOL_LIT:
-          return make_unique<BoolAST>(token, lexer_data.bool_val);
+          return std::make_unique<BoolAST>(token, lexer_data.bool_val);
         default:
           break;
       }
@@ -446,9 +446,9 @@ namespace minic_parser {
         return throwError("parseIdentifier: Expected ')'");
       }
       getNextToken(); // Consume )
-      return make_unique<FunctionCallAST>(token, ident, std::move(arguments));
+      return std::make_unique<FunctionCallAST>(token, ident, std::move(arguments));
     } else if (isExpressionEnd(active_token.type) || isOperator(active_token.type)) {
-      return make_unique<VariableLoadAST>(token, ident);
+      return std::make_unique<VariableLoadAST>(token, ident);
     }
     return throwError("parseIdentifier: Expected variable or function call");
   }
@@ -485,7 +485,7 @@ namespace minic_parser {
       default:
         return throwError("parseVariable: Expected variable type (non-VOID).");
     }
-    return make_unique<VariableDeclarationAST>(make_unique<VariableLoadAST>(token, ident), variable_type);
+    return std::make_unique<VariableDeclarationAST>(std::make_unique<VariableLoadAST>(token, ident), variable_type);
   }
 
   //

@@ -2,14 +2,11 @@
 
 #include <map>
 #include <memory>
-#include <string>
-#include <utility>
-#include <vector>
 #include <set>
 #include <stdio.h>
+#include <string>
+#include <vector>
 
-#include "llvm/ADT/APFloat.h"
-#include "llvm/ADT/APInt.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
