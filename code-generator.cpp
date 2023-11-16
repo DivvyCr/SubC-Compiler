@@ -560,7 +560,7 @@ namespace minic_code_generator {
         if (!variable_type) throwError(node.getToken(), "Invalid global variable type");
 
         // NOTE: This allocated memory, which is not manually freed:
-        new GlobalVariable(*getModule(), variable_type, false, GlobalValue::LinkageTypes::ExternalLinkage, ConstantInt::getTrue(getBoolType()), global_name);
+        new GlobalVariable(*getModule(), variable_type, false, GlobalValue::CommonLinkage, Constant::getNullValue(variable_type), global_name);
       }
 
       Function* generatePrototype(PrototypeAST &node) {
