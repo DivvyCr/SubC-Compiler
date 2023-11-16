@@ -131,7 +131,7 @@ namespace minic_code_generator {
           return getBuilder()->CreateLoad(variable_alloca->getAllocatedType(), variable_alloca, variable_name);
         }
 
-        GlobalVariable *global_variable = getModule()->getNamedGlobal(variable_name);
+        GlobalVariable *global_variable = getModule()->getGlobalVariable(variable_name);
         if (global_variable) {
           return getBuilder()->CreateLoad(global_variable->getValueType(), global_variable);
         }
@@ -147,7 +147,7 @@ namespace minic_code_generator {
         string assignee_name = node.getIdentifier();
         AllocaInst *assignee_alloca = searchScopes(assignee_name);
         if (assignee_alloca) return storeAssignment(node.getToken(), assignee_alloca, expression, assignee_alloca->getAllocatedType());
-        GlobalVariable *global_variable = getModule()->getNamedGlobal(assignee_name);
+        GlobalVariable *global_variable = getModule()->getGlobalVariable(assignee_name);
         if (global_variable) return storeAssignment(node.getToken(), global_variable, expression, global_variable->getValueType());
 
         string err_str = "Unknown variable for assignment: " + assignee_name;
@@ -550,7 +550,7 @@ namespace minic_code_generator {
       void generateGlobal(VariableDeclarationAST &node) {
         string global_name = node.getVariable()->getIdentifier();
 
-        GlobalVariable *global_variable = getModule()->getNamedGlobal(global_name);
+        GlobalVariable *global_variable = getModule()->getGlobalVariable(global_name);
         if (global_variable) {
           string err_str = "Cannot redeclare global variable: " + global_name;
           throwError(node.getToken(), err_str);
@@ -559,7 +559,8 @@ namespace minic_code_generator {
         Type *variable_type = convertNonVoidType(node.getType());
         if (!variable_type) throwError(node.getToken(), "Invalid global variable type");
 
-        getModule()->getOrInsertGlobal(node.getVariable()->getIdentifier(), variable_type);
+        // NOTE: This allocated memory, which is not manually freed:
+        new GlobalVariable(*getModule(), variable_type, false, GlobalValue::LinkageTypes::ExternalLinkage, ConstantInt::getTrue(getBoolType()), global_name);
       }
 
       Function* generatePrototype(PrototypeAST &node) {
