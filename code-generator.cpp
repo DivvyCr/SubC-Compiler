@@ -130,7 +130,7 @@ namespace minic_code_generator {
 
         GlobalVariable *global_variable = getModule()->getGlobalVariable(variable_name);
         if (global_variable) {
-          return getBuilder()->CreateLoad(global_variable->getValueType(), global_variable);
+          return getBuilder()->CreateLoad(global_variable->getValueType(), global_variable, variable_name);
         }
 
         string err_str = "Cannot reference undeclared variable: " + variable_name;
@@ -458,7 +458,12 @@ namespace minic_code_generator {
         SymbolTable new_scope;
         ScopedLocalVariables->push_back(&new_scope);
         for (const PtrVariableDeclarationAST &var : node.getDeclarations()) generateCode(*var);
-        for (const PtrStatementAST &stmt : node.getStatements()) generateCode(*stmt);
+        for (const PtrStatementAST &stmt : node.getStatements()) {
+          if (getBuilder()->GetInsertBlock()->getTerminator()) {
+            break; // Stopping code generation for this block after a branch or a return instruction
+          }
+          generateCode(*stmt);
+        }
         ScopedLocalVariables->pop_back();
       }
       void visit(IfBlockAST &node) {
@@ -467,22 +472,47 @@ namespace minic_code_generator {
         BasicBlock *false_block = BasicBlock::Create(*getContext(), "if.false", parent_function);
         BasicBlock *after_block = BasicBlock::Create(*getContext(), "if.after", parent_function);
 
+        bool is_true_block_terminated = false;
+        bool is_false_block_terminated = false;
+
         // Generate code for the condition:
         Value *condition = ExpressionGenerator.generateCode(*node.getCondition());
-        getBuilder()->CreateCondBr(condition, true_block, false_block);
+        // Handle optional False branch; note the conditional branches:
+        if (node.getFalseBranch()) {
+          getBuilder()->CreateCondBr(condition, true_block, false_block);
+
+          // Generate code for the False branch:
+          getBuilder()->SetInsertPoint(false_block);
+          generateCode(*node.getFalseBranch());
+          // Handle premature terminators (ie. return statements):
+          if (!getBuilder()->GetInsertBlock()->getTerminator()) {
+            getBuilder()->CreateBr(after_block);
+          } else {
+            is_false_block_terminated = true;
+          }
+        } else {
+          getBuilder()->CreateCondBr(condition, true_block, after_block);
+          // No False branch, so false_block is unreachable:
+          false_block->eraseFromParent();
+        }
 
         // Generate code for the True branch:
         getBuilder()->SetInsertPoint(true_block);
         generateCode(*node.getTrueBranch());
-        getBuilder()->CreateBr(after_block);
+        // Handle premature terminators (ie. return statements):
+        if (!getBuilder()->GetInsertBlock()->getTerminator()) {
+          getBuilder()->CreateBr(after_block);
+        } else {
+          is_true_block_terminated = true;
+        }
 
-        // Generate code for the False branch:
-        getBuilder()->SetInsertPoint(false_block);
-        generateCode(*node.getFalseBranch());
-        getBuilder()->CreateBr(after_block);
-
-        // Place subsequent insertion to after block:
-        getBuilder()->SetInsertPoint(after_block);
+        if (is_true_block_terminated && is_false_block_terminated) {
+          // Both blocks were prematurely terminated, so after_block is unreachable:
+          after_block->eraseFromParent();
+        } else {
+          // Place subsequent insertion to after block:
+          getBuilder()->SetInsertPoint(after_block);
+        }
       }
       void visit(WhileBlockAST &node) {
         Function *parent_function = getBuilder()->GetInsertBlock()->getParent();
@@ -501,8 +531,10 @@ namespace minic_code_generator {
         // Generate code for the body:
         getBuilder()->SetInsertPoint(loop_block);
         generateCode(*node.getBody());
-        getBuilder()->CreateBr(cond_block);
-        loop_block = getBuilder()->GetInsertBlock();
+        // Handle premature terminators (ie. return statements):
+        if (!getBuilder()->GetInsertBlock()->getTerminator()) {
+          getBuilder()->CreateBr(cond_block);
+        }
 
         // Place subsequent insertion to after block:
         getBuilder()->SetInsertPoint(after_block);
@@ -624,14 +656,17 @@ namespace minic_code_generator {
         vector<SymbolTable *> symbols;
         symbols.push_back(&function_scope);
         StatementCodeGenerator(getContext(), getModule(), getBuilder(), &symbols, Functions).generateCode(*node.getBody());
-        // Ensure function has a return statement:
-        if (!getBuilder()->GetInsertBlock()->getTerminator()) {
-          if (function->getReturnType()->isVoidTy()) {
-            getBuilder()->CreateRetVoid();
-          } else {
-            throwError(node.getToken(), "Non-void function must have a return statement");
+        // Ensure all function paths are terminated by a branch or a return statement:
+        for (auto block_iterator = function->begin(); block_iterator != function->end(); ++block_iterator) {
+          if (!block_iterator->getTerminator()) {
+            if (function->getReturnType()->isVoidTy()) {
+              getBuilder()->CreateRetVoid();
+            } else {
+              throwError(node.getToken(), "Non-void function must have a return statement");
+            }
           }
         }
+
         // LLVM-supplied function to catch consistency bugs:
         verifyFunction(*function);
       }
