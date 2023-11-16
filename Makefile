@@ -3,7 +3,7 @@
 
 CXX=clang++ -std=c++17
 
-CFLAGS= -g -O3 `llvm-config-17 --cppflags --ldflags --system-libs --libs all` \
+CFLAGS= -g -O0 `llvm-config-17 --cppflags --ldflags --system-libs --libs all` \
 				-Wno-unused-function -Wno-unknown-warning-option -fno-rtti
 
 OFLAGS= -g -O3 `llvm-config-17 --cppflags`
