@@ -1,15 +1,11 @@
 #include <map>
 #include <string>
-#include <tuple>
 
 #include "abstract-syntax.h"
 #include "lexer.h"
 
 using std::string;
 using std::vector;
-using std::tuple;
-using std::unique_ptr;
-using std::make_unique;
 
 using namespace minic_lexer;
 

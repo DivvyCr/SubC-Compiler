@@ -5,20 +5,13 @@
 #include <string>
 #include <vector>
 
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/Value.h"
-
 #include "visitor.h"
 #include "lexer.h"
 
-using namespace minic_lexer;
-
 using std::string;
 using std::vector;
-using std::unique_ptr;
-using llvm::Function;
-using llvm::Value;
+
+using namespace minic_lexer;
 
 //
 // TYPES:
@@ -45,15 +38,15 @@ class AssignmentAST;
 class FunctionCallAST;
 class UnaryExpressionAST;
 class BinaryExpressionAST;
-using PtrExpressionAST = unique_ptr<ExpressionAST>;
-using PtrIntAST = unique_ptr<IntAST>;
-using PtrFloatAST = unique_ptr<FloatAST>;
-using PtrBoolAST = unique_ptr<BoolAST>;
-using PtrVariableLoadAST = unique_ptr<VariableLoadAST>;
-using PtrAssignmentAST = unique_ptr<AssignmentAST>;
-using PtrFunctionCallAST = unique_ptr<FunctionCallAST>;
-using PtrUnaryExpressionAST = unique_ptr<UnaryExpressionAST>;
-using PtrBinaryExpressionAST = unique_ptr<BinaryExpressionAST>;
+using PtrExpressionAST = std::unique_ptr<ExpressionAST>;
+using PtrIntAST = std::unique_ptr<IntAST>;
+using PtrFloatAST = std::unique_ptr<FloatAST>;
+using PtrBoolAST = std::unique_ptr<BoolAST>;
+using PtrVariableLoadAST = std::unique_ptr<VariableLoadAST>;
+using PtrAssignmentAST = std::unique_ptr<AssignmentAST>;
+using PtrFunctionCallAST = std::unique_ptr<FunctionCallAST>;
+using PtrUnaryExpressionAST = std::unique_ptr<UnaryExpressionAST>;
+using PtrBinaryExpressionAST = std::unique_ptr<BinaryExpressionAST>;
 // Statements:
 class StatementAST;
 class VariableDeclarationAST;
@@ -62,20 +55,20 @@ class CodeBlockAST;
 class IfBlockAST;
 class WhileBlockAST;
 class ReturnAST;
-using PtrStatementAST = unique_ptr<StatementAST>;
-using PtrVariableDeclarationAST = unique_ptr<VariableDeclarationAST>;
-using PtrExpressionStatementAST = unique_ptr<ExpressionStatementAST>;
-using PtrCodeBlockAST = unique_ptr<CodeBlockAST>;
-using PtrIfBlockAST = unique_ptr<IfBlockAST>;
-using PtrWhileBlockAST = unique_ptr<WhileBlockAST>;
-using PtrReturnAST = unique_ptr<ReturnAST>;
+using PtrStatementAST = std::unique_ptr<StatementAST>;
+using PtrVariableDeclarationAST = std::unique_ptr<VariableDeclarationAST>;
+using PtrExpressionStatementAST = std::unique_ptr<ExpressionStatementAST>;
+using PtrCodeBlockAST = std::unique_ptr<CodeBlockAST>;
+using PtrIfBlockAST = std::unique_ptr<IfBlockAST>;
+using PtrWhileBlockAST = std::unique_ptr<WhileBlockAST>;
+using PtrReturnAST = std::unique_ptr<ReturnAST>;
 // Top-level:
 class PrototypeAST;
 class FunctionAST;
 class ProgramAST;
-using PtrPrototypeAST = unique_ptr<PrototypeAST>;
-using PtrFunctionAST = unique_ptr<FunctionAST>;
-using PtrProgramAST = unique_ptr<ProgramAST>;
+using PtrPrototypeAST = std::unique_ptr<PrototypeAST>;
+using PtrFunctionAST = std::unique_ptr<FunctionAST>;
+using PtrProgramAST = std::unique_ptr<ProgramAST>;
 
 class BaseAST {
   public:
