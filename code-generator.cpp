@@ -216,8 +216,8 @@ namespace minic_code_generator {
           Value *argument = generateCode(*node.getArguments()[idx]);
 
           Type *expected_type = called_function->getArg(idx)->getType();
-          /* implicitCastToMatch(node.getArguments()[idx]->getToken(), "argument", expected_type, &argument); */
-          implicitCastToWiden(node.getArguments()[idx]->getToken(), "argument", expected_type, &argument);
+          implicitCastToMatch(node.getArguments()[idx]->getToken(), "argument", expected_type, &argument);
+          /* implicitCastToWiden(node.getArguments()[idx]->getToken(), "argument", expected_type, &argument); */
 
           arguments.push_back(argument);
         }
