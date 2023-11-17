@@ -507,7 +507,7 @@ namespace minic_code_generator {
 
         // Generate code for the condition:
         Value *condition = ExpressionGenerator.generateCode(*node.getCondition());
-        if (!isBoolType(condition)) convertToBool(&condition);
+        if (!isBoolType(condition->getType())) convertToBool(&condition);
         // Handle optional False branch; note the conditional branches:
         if (node.getFalseBranch()) {
           getBuilder()->CreateCondBr(condition, true_block, false_block);
@@ -557,7 +557,7 @@ namespace minic_code_generator {
         // Generate code for the condition:
         getBuilder()->SetInsertPoint(cond_block);
         Value *condition = ExpressionGenerator.generateCode(*node.getCondition());
-        if (!isBoolType(condition)) convertToBool(&condition);
+        if (!isBoolType(condition->getType())) convertToBool(&condition);
         getBuilder()->CreateCondBr(condition, loop_block, after_block);
 
         // Generate code for the body:
