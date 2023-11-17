@@ -7,7 +7,7 @@
 
 namespace minic_printer {
 
-  static const string TREE_INDENT = "  ";
+  static const string TREE_INDENT = "   ";
 
   class Printer : public ExpressionVisitor, public StatementVisitor {
     std::string CurrentPrefix = "";
@@ -50,19 +50,19 @@ namespace minic_printer {
 
     private:
       void* visit(IntAST &node) override {
-        Out << CurrentPrefix << "Int: " << std::to_string(node.getValue());
+        Out << CurrentPrefix << std::to_string(node.getValue());
         return nullptr;
       }
       void* visit(FloatAST &node) override {
-        Out << CurrentPrefix << "Float: " << std::to_string(node.getValue());
+        Out << CurrentPrefix << std::to_string(node.getValue());
         return nullptr;
       }
       void* visit(BoolAST &node) override {
-        Out << CurrentPrefix << "Bool: " << std::to_string(node.getValue());
+        Out << CurrentPrefix << std::to_string(node.getValue());
         return nullptr;
       }
       void* visit(VariableLoadAST &node) override {
-        Out << CurrentPrefix << "Variable: " << node.getIdentifier();
+        Out << CurrentPrefix << "LOAD: " << node.getIdentifier();
         return nullptr;
       }
       void* visit(AssignmentAST &node) override {
@@ -87,21 +87,9 @@ namespace minic_printer {
         return nullptr;
       }
       void visit(VariableDeclarationAST &node) override {
-        Out << CurrentPrefix;
-        switch (node.getType()) {
-          case INTEGER:
-            Out << "Int: ";
-            break;
-          case FLOAT:
-            Out << "Float: ";
-            break;
-          case BOOL:
-            Out << "Bool: ";
-            break;
-          default:
-            break;
-        }
-        Out << node.getVariable()->getIdentifier();
+        Out << CurrentPrefix << "DECLARE: (";
+        printType(node.getType());
+        Out << ") " << node.getVariable()->getIdentifier();
       }
       void visit(ExpressionStatementAST &node) override {
         print(*node.getExpression(), false);
@@ -135,6 +123,8 @@ namespace minic_printer {
       // Non-visitor:
       void print(const PrototypeAST &node) {
         Out << "\n" << CurrentPrefix << "Prototype: " << node.getIdentifier();
+        Out << "\n" << CurrentPrefix + TREE_INDENT << "RETURNS: ";
+        printType(node.getReturnType());
         for (const PtrVariableDeclarationAST &param : node.getParameters()) print(*param);
       }
       void print(const FunctionAST &node) {
@@ -143,6 +133,23 @@ namespace minic_printer {
         print(*node.getPrototype());
         CurrentPrefix.erase(0, TREE_INDENT.size()); // NOTE: Erases characters from the string START.
         print(*node.getBody());
+      }
+
+      // Utility:
+      void printType(MiniCType minic_type) {
+        switch (minic_type) {
+          case INTEGER:
+            Out << "INT";
+            break;
+          case FLOAT:
+            Out << "FLOAT";
+            break;
+          case BOOL:
+            Out << "BOOL";
+            break;
+          default:
+            break;
+        }
       }
   };
 

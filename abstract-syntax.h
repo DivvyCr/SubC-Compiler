@@ -284,7 +284,7 @@ class PrototypeAST : public BaseAST {
       Parameters(std::make_move_iterator(parameters.begin()),
           std::make_move_iterator(parameters.end())) {}
     const string getIdentifier() const { return Identifier; }
-    MiniCType getReturnType() { return ReturnType; }
+    const MiniCType getReturnType() const { return ReturnType; }
     const vector<PtrVariableDeclarationAST> &getParameters() const { return Parameters; }
   private:
     string Identifier;

@@ -33,7 +33,7 @@ namespace minic_code_generator {
     public:
       BaseCodeGenerator(LLVMContext *llvmContext, Module *llvmModule, IRBuilder<> *irBuilder)
         : TheContext(llvmContext), TheModule(llvmModule), TheBuilder(irBuilder) {}
-
+    protected:
       LLVMContext *getContext() { return TheContext; }
       Module *getModule() { return TheModule; }
       IRBuilder<> *getBuilder() { return TheBuilder; }
@@ -43,25 +43,63 @@ namespace minic_code_generator {
       Type *getBoolType() { return Type::getInt1Ty(*getContext()); }
       Type *getVoidType() { return Type::getVoidTy(*getContext()); }
 
-      Type *convertNonVoidType(MiniCType minic_type) {
+      bool isIntType(Type *t) { return t->isIntegerTy(32); }
+      bool isFloatType(Type *t) { return t->isFloatTy(); }
+      bool isBoolType(Type *t) { return t->isIntegerTy(1); }
+      bool isVoidType(Type *t) { return t->isVoidTy(); }
+
+      Type *convertNonVoidType(TOKEN error_token, const string &error_substring, MiniCType minic_type) {
         switch (minic_type) {
           case INTEGER: return getIntType();
           case FLOAT: return getFloatType();
           case BOOL: return getBoolType();
           default: break;
         }
-        return nullptr;
+        return throwError(error_token, "Invalid " + error_substring + " type");
       }
-    protected:
-      AllocaInst *createEntryBlockAlloca(Function *function, Type *variable_type, StringRef variable_name) {
-        IRBuilder<> tmp_builder(&function->getEntryBlock(), function->getEntryBlock().begin());
-        AllocaInst *variable_alloca = tmp_builder.CreateAlloca(variable_type, nullptr, variable_name);
-        return variable_alloca;
+
+      void convertToBool(Value **value) {
+        if (isIntType((*value)->getType())) {
+          *value = getBuilder()->CreateCmp(CmpInst::Predicate::ICMP_NE, *value, Constant::getNullValue(getIntType()), "tobool");
+        } else if (isFloatType((*value)->getType())) {
+          *value = getBuilder()->CreateCmp(CmpInst::Predicate::FCMP_UNE, *value, Constant::getNullValue(getFloatType()), "tobool");
+        }
       }
-      void convertToFloatIfInt(Value **value, Type *value_type) {
-        if (value_type->isIntegerTy(32)) {
-          *value = getBuilder()->CreateSIToFP(*value, getFloatType(), "conv");
-          (*value)->mutateType(getFloatType());
+      void convertToInt(Value **value) {
+        if (isBoolType((*value)->getType())) {
+          *value = getBuilder()->CreateZExt(*value, getIntType(), "toint");
+        } else if (isFloatType((*value)->getType())) {
+          *value = getBuilder()->CreateFPToSI(*value, getIntType(), "toint");
+        }
+      }
+      void convertToFloat(Value **value) {
+        if (isBoolType((*value)->getType())) {
+          *value = getBuilder()->CreateUIToFP(*value, getFloatType(), "tofloat");
+        } else if (isIntType((*value)->getType())) {
+          *value = getBuilder()->CreateSIToFP(*value, getFloatType(), "tofloat");
+        }
+      }
+      void implicitCastToMatch(TOKEN error_token, const string &error_substring, Type *expected_type, Value **value) {
+        if (isBoolType(expected_type)) { convertToBool(value); }
+        else if (isIntType(expected_type)) { convertToInt(value); }
+        else if (isFloatType(expected_type)) { convertToFloat(value); }
+      }
+      void implicitCastToWiden(TOKEN error_token, const string &error_substring, Type *expected_type, Value **value) {
+        Type *value_type = (*value)->getType();
+        if (isFloatType(expected_type)) {
+          // Both int and bool can be widened to float:
+          convertToFloat(value);
+        } else if (isIntType(expected_type)) {
+          // Only bool can be widened to int:
+          if (isFloatType(value_type)) {
+            throwError(error_token, "Mismatched expression type (float) with " + error_substring + " type (int)");
+          }
+          convertToInt(value);
+        } else if (isBoolType(expected_type)) {
+          // Nothing can be widened to bool:
+          if (isFloatType(value_type) || isIntType(value_type)) {
+            throwError(error_token, "Mismatched expression type (int/float) with " + error_substring + " type (bool)");
+          }
         }
       }
     private:
@@ -94,12 +132,12 @@ namespace minic_code_generator {
       {{GE, INTEGER}, CmpInst::Predicate::ICMP_SGE},
       {{LT, INTEGER}, CmpInst::Predicate::ICMP_SLT},
       {{LE, INTEGER}, CmpInst::Predicate::ICMP_SLE},
-      {{EQ, FLOAT}, CmpInst::Predicate::FCMP_OEQ},
-      {{NE, FLOAT}, CmpInst::Predicate::FCMP_ONE},
-      {{GT, FLOAT}, CmpInst::Predicate::FCMP_OGT},
-      {{GE, FLOAT}, CmpInst::Predicate::FCMP_OGE},
-      {{LT, FLOAT}, CmpInst::Predicate::FCMP_OLT},
-      {{LE, FLOAT}, CmpInst::Predicate::FCMP_OLE}
+      {{EQ, FLOAT}, CmpInst::Predicate::FCMP_UEQ},
+      {{NE, FLOAT}, CmpInst::Predicate::FCMP_UNE},
+      {{GT, FLOAT}, CmpInst::Predicate::FCMP_UGT},
+      {{GE, FLOAT}, CmpInst::Predicate::FCMP_UGE},
+      {{LT, FLOAT}, CmpInst::Predicate::FCMP_ULT},
+      {{LE, FLOAT}, CmpInst::Predicate::FCMP_ULE}
     };
 
     public:
@@ -109,7 +147,6 @@ namespace minic_code_generator {
       Value* generateCode(const ExpressionAST &node) {
         return reinterpret_cast<Value *>(const_cast<ExpressionAST &>(node).dispatch(*this));
       }
-
     private:
       void* visit(IntAST &node) {
         return ConstantInt::get(getIntType(), node.getValue(), /*isSigned:*/ true);
@@ -139,11 +176,12 @@ namespace minic_code_generator {
       void* visit(AssignmentAST &node) {
         // Generate assignment:
         Value *expression = generateCode(*node.getAssignment());
+        string assignee_name = node.getIdentifier();
 
         // Try to assign local variable first, to shadow any global variables:
-        string assignee_name = node.getIdentifier();
         AllocaInst *assignee_alloca = searchScopes(assignee_name);
         if (assignee_alloca) return storeAssignment(node.getToken(), assignee_alloca, expression, assignee_alloca->getAllocatedType());
+
         GlobalVariable *global_variable = getModule()->getGlobalVariable(assignee_name);
         if (global_variable) return storeAssignment(node.getToken(), global_variable, expression, global_variable->getValueType());
 
@@ -154,11 +192,16 @@ namespace minic_code_generator {
         string called_name = node.getIdentifier();
         int num_supplied_arguments = node.getArguments().size();
 
+        // Look for an appropriate function in the function table:
+        // (appropriate means having the same name and number of arguments)
         Function *called_function;
         vector<Function *> potential_functions = (*Functions)[called_name];
         for (auto &f : potential_functions) {
           int num_expected_arguments = f->arg_size();
-          if (num_supplied_arguments == num_expected_arguments) called_function = f;
+          if (num_supplied_arguments == num_expected_arguments) {
+            called_function = f;
+            break;
+          }
         }
 
         if (!called_function) {
@@ -167,23 +210,17 @@ namespace minic_code_generator {
           return throwError(node.getToken(), err_str);
         }
 
+        // Type-check each argument:
         vector<Value *> arguments;
         for (int idx = 0; idx < num_supplied_arguments; idx++) {
           Value *argument = generateCode(*node.getArguments()[idx]);
-          // Convert integer argument to float, if necessary:
+
           Type *expected_type = called_function->getArg(idx)->getType();
-          Type *argument_type = argument->getType();
-          if (expected_type->isFloatTy() && argument_type->isIntegerTy(32)) {
-            convertToFloatIfInt(&argument, argument_type);
-          }
-          // Type-check:
-          if (argument->getType() != expected_type) {
-            return throwError(node.getArguments()[idx]->getToken(), "Mismatched argument type on function call");
-          }
+          /* implicitCastToMatch(node.getArguments()[idx]->getToken(), "argument", expected_type, &argument); */
+          implicitCastToWiden(node.getArguments()[idx]->getToken(), "argument", expected_type, &argument);
 
           arguments.push_back(argument);
         }
-
         return getBuilder()->CreateCall(called_function, arguments);
       }
       void* visit(UnaryExpressionAST &node) {
@@ -191,18 +228,17 @@ namespace minic_code_generator {
         Type *expression_type = expression->getType();
         switch (node.getOperator().type) {
           case MINUS:
-            if (expression_type->isFloatTy()) {
-              return getBuilder()->CreateFNeg(expression); // Flips sign bit
+            Value *negated;
+            if (isFloatType(expression_type)) {
+              negated = getBuilder()->CreateFNeg(expression); // Flips sign bit
+            } else {
+              convertToInt(&expression); // Widens bool to int, if needed
+              negated = getBuilder()->CreateNeg(expression); // Subtracts from 0, potential overflow
             }
-            if (expression_type->isIntegerTy(32)) {
-              return getBuilder()->CreateNeg(expression); // Subtracts from 0, potential overflow
-            }
-            return throwError(node.getToken(), "Cannot negate non-arithmetic expression");
+            return negated;
           case NOT:
-            if (expression_type->isIntegerTy(1)) {
-              return getBuilder()->CreateNot(expression); // Applies (1 XOR expression)
-            }
-            return throwError(node.getToken(), "Cannot apply NOT to non-boolean expression");
+            convertToBool(&expression); // Numeric types treated as boolean in Standard C
+            return getBuilder()->CreateNot(expression); // Applies (1 XOR expression)
           default:
             break;
         }
@@ -247,17 +283,19 @@ namespace minic_code_generator {
         Value *right = generateCode(*node.getRight());
         Type *right_type = right->getType();
 
-        // Type-check:
+        // Type-check; if mismatched, only implicit cast to widen:
         MiniCType operands_type;
-        if (left_type->isFloatTy() || right_type->isFloatTy()) {
-          convertToFloatIfInt(&left, left_type);
-          convertToFloatIfInt(&right, right_type);
+        if (isFloatType(left_type) || isFloatType(right_type)) {
+          convertToFloat(&left);
+          convertToFloat(&right);
           operands_type = FLOAT;
-        } else if (left_type->isIntegerTy(1) && right_type->isIntegerTy(1)) {
-          operands_type = BOOL;
-        } else if (left_type->isIntegerTy(32) && right_type->isIntegerTy(32)) {
+        } else if (isIntType(left_type) || isIntType(right_type)) {
+          convertToInt(&left);
+          convertToInt(&right);
           operands_type = INTEGER;
-        } else {
+        } else if (isBoolType(left_type) && isBoolType(right_type)) {
+          operands_type = BOOL;
+        } else { // Should be unreachable:
           string err_str = "Mismatched operand types for " + node.getOperator().lexeme + " operator";
           return throwError(node.getToken(), err_str); 
         }
@@ -325,7 +363,7 @@ namespace minic_code_generator {
           if (lor_merge_block) lor_phi->addIncoming(land_phi, land_merge_block);
         } else if (rhs_operator.type == OR) {
           generateLogicRHS(parent_function, lor_merge_block, lor_phi, idx);
-        } else { // Theoretically unreachable due to parser:
+        } else { // Should be unreachable due to parser:
           throwError(rhs_operator, "Invalid operator in logical expression: " + rhs_operator.lexeme);
         }
 
@@ -345,7 +383,7 @@ namespace minic_code_generator {
             if (land_merge_block && (idx != 0 || next_clause == land_merge_block)) {
               land_phi->addIncoming(getBuilder()->getFalse(), lhs_block);
             }
-          } else { // Theoretically unreachable due to parser:
+          } else { // Should be unreachable due to parser:
             throwError(rhs_operator, "Invalid operator in logical expression: " + cur_operator.lexeme);
           }
           idx--;
@@ -366,7 +404,7 @@ namespace minic_code_generator {
         BasicBlock *rhs_block = BasicBlock::Create(*getContext(), "logic.rhs", parent_function);
         getBuilder()->SetInsertPoint(rhs_block);
         Value *last_operand = generateCode(**logic_subexprs[idx+1]);
-        if (!last_operand->getType()->isIntegerTy(1)) throwError((*logic_subexprs[idx+1])->getToken(), "Non-boolean operand in boolean expression");
+        if (!isBoolType(last_operand->getType())) convertToBool(&last_operand); // Numeric types treated as boolean in Standard C
         getBuilder()->CreateBr(merge_block);
         phi->addIncoming(last_operand, rhs_block);
       }
@@ -377,7 +415,7 @@ namespace minic_code_generator {
         *lhs_block = (idx == 0) ? entry_block : BasicBlock::Create(*getContext(), "logic.lhs", parent_function);
         getBuilder()->SetInsertPoint(*lhs_block);
         Value *cur_operand = generateCode(**logic_subexprs[idx]);
-        if (!cur_operand->getType()->isIntegerTy(1)) throwError((*logic_subexprs[idx])->getToken(), "Non-boolean operand in boolean expression");
+        if (!isBoolType(cur_operand->getType())) convertToBool(&cur_operand); // Numeric types treated as boolean in Standard C
         return cur_operand;
       }
 
@@ -392,20 +430,12 @@ namespace minic_code_generator {
 
       Value* storeAssignment(TOKEN error_token, Value *assignee, Value *assignment, Type *assignee_type) {
         Type *assignment_type = assignment->getType();
-        if (assignee_type->isIntegerTy(32) && assignment_type->isFloatTy()) {
-          throwError(error_token, "Cannot assign float value to integer variable due to loss of precision");
-          exit(1);
+
+        if (assignee_type != assignment_type) {
+          implicitCastToMatch(error_token, "assignment", assignee_type, &assignment);
         }
-        // Convert integer assignment to float, if necessary:
-        if (assignee_type->isFloatTy() && assignment_type->isIntegerTy(32)) {
-          convertToFloatIfInt(&assignment, assignment_type);
-        }
-        // Type-check:
-        if (assignee_type == assignment->getType()) {
-          getBuilder()->CreateStore(assignment, assignee);
-          return assignment;
-        }
-        return throwError(error_token, "Mismatched operand types on assignment");
+        getBuilder()->CreateStore(assignment, assignee);
+        return assignment;
       }
  
       bool isArithmeticOp(int operator_type) {
@@ -439,7 +469,7 @@ namespace minic_code_generator {
 
       void visit(VariableDeclarationAST &node) {
         string variable_name = node.getVariable()->getIdentifier();
-        Type *variable_type = convertNonVoidType(node.getType());
+        Type *variable_type = convertNonVoidType(node.getToken(), "variable", node.getType());
         AllocaInst *variable_alloca = (*ScopedLocalVariables->back())[variable_name];
 
         if (variable_alloca) {
@@ -448,7 +478,7 @@ namespace minic_code_generator {
         }
 
         Function *parent_function = getBuilder()->GetInsertBlock()->getParent();
-        AllocaInst *new_variable_alloca = createEntryBlockAlloca(parent_function, variable_type, variable_name);
+        AllocaInst *new_variable_alloca = getBuilder()->CreateAlloca(variable_type, nullptr, variable_name);
         (*ScopedLocalVariables->back())[node.getVariable()->getIdentifier()] = new_variable_alloca;
       }
       void visit(ExpressionStatementAST &node) {
@@ -544,24 +574,15 @@ namespace minic_code_generator {
         Value *return_body = (node.getBody())
           ? ExpressionGenerator.generateCode(*node.getBody()) : nullptr;
 
-        // Convert integer assignment to float if necessary, and type-check:
+        // Type-check; if mismatched, only implicit cast to widen:
         Type *expected_type = parent_function->getReturnType();
         if (return_body) {
-          Type *returned_type = return_body->getType();
-          if (expected_type->isFloatTy() && returned_type->isIntegerTy(32)) {
-            convertToFloatIfInt(&return_body, returned_type);
-          }
-          if (expected_type != return_body->getType()) {
-            throwError(node.getToken(), "Mismatched expression type on function return");
-          }
-        } else if (!return_body && expected_type != getVoidType()) {
-          throwError(node.getToken(), "Mismatched expression type on function return");
-        }
-
-        // Generate return statement:
-        if (node.getBody()) {
+          implicitCastToWiden(node.getToken(), "function return", expected_type, &return_body);
           getBuilder()->CreateRet(return_body);
         } else {
+          if (expected_type != getVoidType()) {
+            throwError(node.getToken(), "Mismatched expression type with function return type (void)");
+          }
           getBuilder()->CreateRetVoid();
         }
       }
@@ -585,10 +606,8 @@ namespace minic_code_generator {
           throwError(node.getToken(), err_str);
         }
 
-        Type *variable_type = convertNonVoidType(node.getType());
-        if (!variable_type) throwError(node.getToken(), "Invalid global variable type");
-
         // NOTE: This allocated memory, which is not manually freed:
+        Type *variable_type = convertNonVoidType(node.getToken(), "global variable", node.getType());
         new GlobalVariable(*getModule(), variable_type, false, GlobalValue::CommonLinkage, Constant::getNullValue(variable_type), global_name);
       }
 
@@ -603,13 +622,12 @@ namespace minic_code_generator {
           } else {
             parameter_names.insert(parameter_name);
           }
-          Type *parameter_type = convertNonVoidType(par->getType());
-          if (!parameter_type) return throwError(par->getToken(), "Invalid parameter type");
+          Type *parameter_type = convertNonVoidType(par->getToken(), "parameter", par->getType());
           parameter_types.push_back(parameter_type);    
         }
         // Convert parsed type to LLVM Type:
         MiniCType return_minictype = node.getReturnType();
-        Type *return_type = (return_minictype == VOID) ? getVoidType() : convertNonVoidType(return_minictype);
+        Type *return_type = (return_minictype == VOID) ? getVoidType() : convertNonVoidType(node.getToken(), "function return", return_minictype);
         if (!return_type) return throwError(node.getToken(), "Invalid function return type");
         // Generate LLVM function signature:
         FunctionType *function_signature = FunctionType::get(return_type, parameter_types, false);
@@ -647,7 +665,7 @@ namespace minic_code_generator {
         // Initialise local variables with function parameters:
         SymbolTable function_scope;
         for (auto &arg : function->args()) {
-          AllocaInst *argument_alloca = createEntryBlockAlloca(function, arg.getType(), arg.getName());
+          AllocaInst *argument_alloca = getBuilder()->CreateAlloca(arg.getType(), nullptr, arg.getName());
           getBuilder()->CreateStore(&arg, argument_alloca);
           function_scope[string(arg.getName())] = argument_alloca;
         }
@@ -659,7 +677,7 @@ namespace minic_code_generator {
         // Ensure all function paths are terminated by a branch or a return statement:
         for (auto block_iterator = function->begin(); block_iterator != function->end(); ++block_iterator) {
           if (!block_iterator->getTerminator()) {
-            if (function->getReturnType()->isVoidTy()) {
+            if (isVoidType(function->getReturnType())) {
               getBuilder()->CreateRetVoid();
             } else {
               throwError(node.getToken(), "Non-void function must have a return statement");
