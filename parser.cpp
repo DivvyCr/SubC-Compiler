@@ -19,6 +19,10 @@ namespace minic_parser {
     while (isExtern(active_token.type)) parseExtern(declarations);
     while (isAnyType(active_token.type)) parseDeclaration(declarations);
 
+    if (active_token.type != EOF_TOK) {
+      return throwError("parseProgram: Expected 'int', 'float', 'bool', or 'void' for a global variable or a function declaration");
+    }
+
     return std::make_unique<ProgramAST>(
         std::move(declarations.globals),
         std::move(declarations.externs),
@@ -31,7 +35,7 @@ namespace minic_parser {
  
     // RETURN TYPE:
     if (!isAnyType(active_token.type)) {
-      throwError("parseExtern: Expected TYPE");
+      throwError("parseExtern: Expected 'int', 'float', 'bool', or 'void' for extern declaration");
       return;
     }
     MiniCType return_type = convertType(active_token.type);
@@ -39,7 +43,7 @@ namespace minic_parser {
 
     // IDENTIFIER:
     if (active_token.type != IDENT) {
-      throwError("parseExtern: Expected identifier (for an extern)");
+      throwError("parseExtern: Expected identifier (for extern)");
       return;
     }
     string identifier = lexer_data.identifier_val;
@@ -128,19 +132,11 @@ namespace minic_parser {
 
     if (isVarType(active_token.type)) {
       PtrVariableDeclarationAST first_parameter = parseParameter();
-      if (!first_parameter) {
-        throwError("parseParameters: Error parsing parameter");
-        return parameters;
-      }
       parameters.push_back(std::move(first_parameter));
 
       while (active_token.type == COMMA) {
         getNextToken(); // Consume COMMA
         PtrVariableDeclarationAST next_parameter = parseParameter();
-        if (!next_parameter) {
-          throwError("parseParameters: Error parsing parameters");
-          return parameters;
-        }
         parameters.push_back(std::move(next_parameter));
       }
     } else if (active_token.type == VOID_TOK) {
@@ -152,7 +148,7 @@ namespace minic_parser {
 
   static PtrVariableDeclarationAST parseParameter() {
     if (!isVarType(active_token.type)) {
-      return throwError("parseParameter: Expected TYPE");
+      return throwError("parseParameter: Expected 'int', 'float', or 'bool' for parameter declaration");
     }
     int token_type = active_token.type;
     getNextToken(); // Consume TYPE
@@ -176,7 +172,7 @@ namespace minic_parser {
     getNextToken(); // Consume (
 
     if (!isExpression(active_token.type)) {
-      return throwError("parseIfBlock: Expected EXPR");
+      return throwError("parseIfBlock: Expected an expression");
     }
     PtrExpressionAST condition = parseExpression();
 
@@ -186,7 +182,7 @@ namespace minic_parser {
     getNextToken(); // Consume )
 
     if (!isStatement(active_token.type)) {
-      throwError("parseIfBlock: Expected STMT");
+      throwError("parseIfBlock: Expected a statement");
     }
     PtrCodeBlockAST true_branch = parseCodeBlock();
 
@@ -211,7 +207,7 @@ namespace minic_parser {
     getNextToken(); // Consume (
 
     if (!isExpression(active_token.type)) {
-      return throwError("parseWhileBlock: Expected EXPR");
+      return throwError("parseWhileBlock: Expected an expression");
     }
     PtrExpressionAST condition = parseExpression();
 
@@ -221,7 +217,7 @@ namespace minic_parser {
     getNextToken(); // Consume )
 
     if (!isStatement(active_token.type)) {
-      return throwError("parseWhileBlock: Expected STMT");
+      return throwError("parseWhileBlock: Expected a statement");
     }
     PtrStatementAST body = parseStatement();
     return std::make_unique<WhileBlockAST>(token, std::move(condition), std::move(body));
@@ -284,7 +280,7 @@ namespace minic_parser {
       return declarations;
     }
 
-    throwError("parseBlockDecls: Expected a variable declaration or a statement.");
+    throwError("parseBlockDecls: Expected a variable declaration or a statement");
     return vector<PtrVariableDeclarationAST>();
   }
 
