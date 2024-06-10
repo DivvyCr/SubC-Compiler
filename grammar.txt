@@ -1,0 +1,155 @@
+PROGRAM ::= extern ANY_TYPE LEX_IDENT ( PARAMS ) ; PROGRAM
+          | DECL_LIST
+
+#################
+# Declarations: #
+#################
+
+ANY_TYPE ::= void
+           | VAR_TYPE
+
+VAR_TYPE ::= int
+           | float
+           | bool
+
+DECL_LIST ::= DECL DECL_LIST
+            |  epsilon
+
+DECL ::= VAR_TYPE LEX_IDENT DECL_EXT
+       | void     LEX_IDENT FUNC_SPEC
+
+DECL_EXT ::= ;
+           | FUNC_SPEC
+
+FUNC_SPEC ::= ( PARAMS ) BLOCK
+
+###############
+# Parameters: #
+###############
+
+PARAMS ::= PARAM PARAM_LIST
+         | void
+         | epsilon
+
+PARAM_LIST ::= , PARAM PARAM_LIST
+             | epsilon
+
+PARAM ::= VAR_TYPE LEX_IDENT
+
+##############
+# Structure: #
+##############
+
+BLOCK ::= { BLOCK_DECLS STATEMENTS }
+
+BLOCK_DECLS ::= VAR_TYPE LEX_IDENT ; BLOCK_DECLS
+              | epsilon
+
+STATEMENTS ::= STATEMENT STATEMENTS
+             | ; STATEMENTS
+			 | epsilon
+
+STATEMENT ::= BLOCK
+            | IF_BLOCK
+			| WHILE_BLOCK
+			| RETURN
+			| EXPRESSION ;
+
+IF_BLOCK ::= if ( EXPRESSION ) BLOCK ELSE_BLOCK
+
+ELSE_BLOCK ::= else BLOCK
+             | epsilon
+
+WHILE_BLOCK ::= while ( EXPRESSION ) STATEMENT
+
+RETURN ::= return RETURN_EXT
+
+RETURN_EXT ::= EXPRESSION
+             | epsilon
+
+###############
+# Expression: #
+###############
+
+EXPRESSION ::= ATOM_NO_IDENT OP_MULT OP_ADD OP_COMP OP_EQ OP_AND OP_OR
+             | LEX_IDENT OPT_ASSIGN
+
+
+OPT_ASSIGN ::= OPT_CALL OP_MULT OP_ADD OP_COMP OP_EQ OP_AND OP_OR
+             | = EXPRESSION
+
+
+OP_OR ::= || V_AND OP_OR
+        | epsilon
+
+
+V_AND ::= V_EQ OP_AND
+
+OP_AND ::= && V_EQ OP_AND
+
+
+V_EQ ::= V_COMP OP_EQ
+
+OP_EQ ::= == V_COMP OP_EQ
+        | != V_COMP OP_EQ
+		| epsilon
+
+
+V_COMP ::= V_ADD OP_COMP
+
+OP_COMP ::= <= V_ADD OP_COMP
+          | <  V_ADD OP_COMP
+          | >= V_ADD OP_COMP
+          | >  V_ADD OP_COMP
+		  | epsilon
+
+
+V_ADD ::= V_MULT OP_ADD
+
+OP_ADD ::= + V_MULT OP_ADD
+         | - V_MULT OP-ADD
+  		 | epsilon
+
+
+V_MULT ::= ATOM OP_MULT
+
+OP_MULT ::= * ATOM OP_MULT
+          | / ATOM OP_MULT
+		  | % ATOM OP_MULT
+		  | epsilon
+
+#######################
+# Atomic Expressions: #
+#######################
+
+ATOM_NO_IDENT ::= - ATOM_NO_IDENT
+                | ! ATOM_NO_IDENT
+				| PARENS_NO_IDENT
+
+ATOM ::= - ATOM
+       | ! ATOM
+	   | PARENS
+
+PARENS_NO_IDENT ::= ( EXPRESSION )
+                  | VALUE
+
+PARENS ::= ( EXPRESSION )
+         | LEX_IDENT OPT_CALL
+		 | VALUE
+
+OPT_CALL ::= ( ARGS )
+           | epsilon
+
+VALUE ::= LEX_INT
+        | LEX_FLOAT
+		| LEX_BOOL
+
+##############
+# Arguments: #
+##############
+
+ARGS ::= EXPRESSION ARG_LIST
+       | epsilon
+
+ARG_LIST ::= , EXPRESSION ARG_LIST
+           | epsilon
