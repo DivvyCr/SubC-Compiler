@@ -1,7 +1,10 @@
 #ifndef _LEXER_H
 #define _LEXER_H
 
+#include <map>
 #include <string>
+#include <tuple>
+#include <vector>
 
 using std::string;
 
@@ -50,6 +53,38 @@ namespace minic_lexer {
     LT = int('<'), // <
     GE = -23,      // >=
     GT = int('>')  // >
+  };
+
+  static std::map<string, TOKEN_TYPE> keyword_map = {
+	{"int", INT_TOK},
+	{"float", FLOAT_TOK},
+	{"bool", BOOL_TOK},
+	{"void", VOID_TOK},
+	{"extern", EXTERN},
+	{"if", IF},
+	{"else", ELSE},
+	{"while", WHILE},
+	{"return", RETURN},
+	{"true", BOOL_LIT},
+	{"false", BOOL_LIT},
+  };
+
+  static std::map<char, TOKEN_TYPE> special_char_map = {
+	{'{', LBRA},
+	{'}', RBRA},
+	{'(', LPAR},
+	{')', RPAR},
+	{';', SC},
+	{',', COMMA},
+  };
+
+  static std::vector<std::tuple<string, int, int>> multi_char_array = {
+	std::make_tuple("==", ASSIGN, EQ),
+	std::make_tuple("&&", int('&'), AND),
+	std::make_tuple("||", int('|'), OR ),
+	std::make_tuple("!=", NOT, NE),
+	std::make_tuple("<=", LT,  LE),
+	std::make_tuple(">=", GT,  GE),
   };
 
   struct TOKEN {

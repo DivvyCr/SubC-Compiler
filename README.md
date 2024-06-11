@@ -39,17 +39,17 @@ The gist of the language is as follows:
  - Functions may return `void`
  - Functions may have no parameters, declared as `f()` (ie. no need for explicit `f(void)`)
  - Functions can only be overloaded based on parameter count
- 
+
 ## Example Program
- 
+
 ```c
 float cosine(float x) {
   float cos;
-  float n; 
-  float term; 
+  float n;
+  float term;
   float eps;
   float alt;
-  
+
   n = 1.0;
   term = 1.0;
   eps = 0.000001;
@@ -59,13 +59,13 @@ float cosine(float x) {
     float cos;
     cos = 1.0;
 
-	while (term > eps) { 
-		term = term * x * x / n / (n+1);
-		cos = cos + alt * term;
-		alt = -alt;
-		n = n + 2;
-	}
-	return cos;
+    while (term > eps) {
+      term = term * x * x / n / (n+1);
+      cos = cos + alt * term;
+      alt = -alt;
+      n = n + 2;
+    }
+    return cos;
   }
 }
 ```
