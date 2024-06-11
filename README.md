@@ -43,6 +43,35 @@ The gist of the language is as follows:
  - Functions may have no parameters, declared as `f()` (ie. no need for explicit `f(void)`)
  - Functions can only be overloaded based on parameter count
 
+## Compiler Design
+
+The design is textbook:
+a simple character-by-character lexer feeds a recursive descent parser (which exactly mirrors the LL(1) grammar),
+whose output is represented as a printed abstract syntax tree (albeit with minimal formatting) and then converted into LLVM's intermediate representation.
+
+Some key points are as follows:
+ - The abstract syntax 'components' are divided into three categories:<br>
+   *expressions* (ie. anything that intuitively holds a specific value);<br>
+   *statements*, which aggregate expressions and deal with control flow; and,<br>
+   *top-level constructs*, which organise statements by functions, global declarations, and external linkages.<br>
+   See `src/abstract-syntax.h` for details.
+ - The two visitor classes mirror the first two categories above, largely to streamline code generation &mdash;
+   expression generator (using the expression visitor) deals with low-level instructions and returns intermediate values, whereas
+   statement generator (using the statement visitor) deals with blocks of instructions and their branching, directing their placement, but not returning any values.
+   The top-level program generator simply initiates and organises the above.
+   See `src/visitor.h` and `src/code-generator.cpp`.
+ - The **biggest challenge** in writing the compiler was mirroring the **lazy boolean evaluation** of `clang`.
+   My approach is to painstakingly identify the clauses of the boolean expression according to the disjunctive normal form, and
+   then carefully generate the appropriate lazy branching instructions; to illustrate, consider the expression `x && y || a && b || c`:<br>
+   if `x` is true then it is necessary to check `y`, if it is also true then it is necessary to jump just-after `c`,<br>
+   if `x` is false then it is necessary to jump in-front of `a`,<br>
+   if `a` is true then ...<br>
+   See `generateLazyBooleanExpression()` in `src/code-generator.cpp`.
+
+<p align="center">
+<img src="subc-compiler.png" style="width: 67%" />
+</p>
+
 ## Example Program
 
 Many example programs are shown in `tests/modules/`; one of them is as follows:
