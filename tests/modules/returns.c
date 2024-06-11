@@ -7,7 +7,6 @@ int returns(int x) {
   if (x > 1) {
 	return 1;
 	x = x + 1;
-
   } else {
 	return 2;
 	x = x + 1;

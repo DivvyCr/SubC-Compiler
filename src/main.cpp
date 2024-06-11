@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
 
   // Open output.ll:
   string filename = std::string(argv[1]);
-  string output_file = filename.substr(0, filename.find(".")).append(".ll");
+  string output_file = filename.substr(0, filename.find_last_of(".")).append(".ll");
   std::error_code output_error_code;
   llvm::raw_fd_ostream output_ll(output_file, output_error_code, llvm::sys::fs::OF_None);
   if (output_error_code) {
