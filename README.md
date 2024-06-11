@@ -3,6 +3,7 @@
 <div align="center">
 
 ![Version](https://img.shields.io/badge/latest-v1.0-blue.svg)
+![Tests](https://img.shields.io/badge/tests_passing-100%25-brightgreen)
 ![GitHub License](https://img.shields.io/github/license/DivvyCr/SubC-Compiler?color=blue)
 
 </div>
@@ -17,7 +18,9 @@ I have also referred to [this repository](https://github.com/MarkLeone/WeekendCo
    Alternatively, see [getting started](https://llvm.org/docs/GettingStarted.html#getting-the-source-code-and-building-llvm) and [official downloads](https://releases.llvm.org/download.html)
  1. Clone this repository
  2. Run `make` in the cloned directory
- 3. Run `./mccomp [FILE]`
+ 3. Compile `file.c` with `./subc file.c`, resulting in `file.ll`
+ 4. Use `file.ll` by linking it in a separate `driver.cpp` file (and using it there);<br>
+   see `tests/driver.cpp` for an example.
 
 ## Language Definition
 
@@ -42,30 +45,36 @@ The gist of the language is as follows:
 
 ## Example Program
 
+Many example programs are shown in `tests/modules/`; one of them is as follows:
+
 ```c
-float cosine(float x) {
-  float cos;
-  float n;
-  float term;
-  float eps;
-  float alt;
+int fibonacci(int n) {
+  int total;
+  total = 0;
 
-  n = 1.0;
-  term = 1.0;
-  eps = 0.000001;
-  alt = -1.0;
+  {
+	int first;
+	int second;
+	int next;
+	int c;
 
-  { // Using a nested code block to declare a new variable:
-    float cos;
-    cos = 1.0;
+	first = 0;
+	second = 1;  
+	c = 1;
 
-    while (term > eps) {
-      term = term * x * x / n / (n+1);
-      cos = cos + alt * term;
-      alt = -alt;
-      n = n + 2;
-    }
-    return cos;
+	while(c < n) {
+	  if (c <= 1) {
+		next = c;
+	  } else {
+		next = first + second;
+		first = second;
+		second = next;
+	  }    
+	  c = c + 1;
+	  total = total + next;
+	}
   }
+
+  return total;
 }
 ```
