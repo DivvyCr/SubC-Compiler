@@ -85,7 +85,7 @@ namespace minic_lexer {
       // Consume integer digits:
       while (isdigit(prev_char)) consumeDigit();
 
-      if (prev_char != '.') {
+      if (prev_char == '.') {
         // Consume decimal point, followed by decimal digits:
         consumeDigit();
         while (isdigit(prev_char)) consumeDigit();

@@ -15,7 +15,7 @@ using minic_printer::operator<<;
 
 int main(int argc, char **argv) {
   if (argc != 2) {
-    std::cout << "Usage: ./code InputFile\n";
+    std::cout << "Usage: ./subc [FILE]\n";
     return 1;
   }
 
@@ -32,7 +32,8 @@ int main(int argc, char **argv) {
   std::cout << *root << "\n";
 
   // Open output.ll:
-  string output_file = "output.ll";
+  string filename = std::string(argv[1]);
+  string output_file = filename.substr(0, filename.find(".")).append(".ll");
   std::error_code output_error_code;
   llvm::raw_fd_ostream output_ll(output_file, output_error_code, llvm::sys::fs::OF_None);
   if (output_error_code) {

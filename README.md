@@ -12,9 +12,9 @@ I have also referred to [this repository](https://github.com/MarkLeone/WeekendCo
 
 ## Installation
 
- 0. Install the prerequisites: `clang`, `llvm17`, and `llvm-devel`
-   - I used the `dnf` package manager, so package names may differ on other platforms
-   - Alternatively, see [getting started](https://llvm.org/docs/GettingStarted.html#getting-the-source-code-and-building-llvm) and [official downloads](https://releases.llvm.org/download.html)
+ 0. Install the prerequisites: `clang`, `llvm17`, and `llvm-devel`<br>
+   I used the `dnf` package manager, so package names may differ on other platforms<br>
+   Alternatively, see [getting started](https://llvm.org/docs/GettingStarted.html#getting-the-source-code-and-building-llvm) and [official downloads](https://releases.llvm.org/download.html)
  1. Clone this repository
  2. Run `make` in the cloned directory
  3. Run `./mccomp [FILE]`
